@@ -270,6 +270,8 @@ namespace whiz
         m_impl->min_width  = options.minWidth;
         m_impl->min_height = options.minHeight;
         m_impl->resizable  = options.resizable;
+        m_impl->fullscreen = options.fullscreen;
+        m_impl->frame      = options.frame;
         m_impl->parent     = options.parentWebWindow;
         m_impl->icon       = std::string(options.icon);
 
@@ -315,11 +317,20 @@ namespace whiz
         }
     }
 
-    void WebWindow::setFullScreen(bool fullscreen)
+    void WebWindow::setFullscreen(bool fullscreen)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
-        m_impl->window->set_fullscreen(fullscreen);
+        m_impl->fullscreen = fullscreen;
+        if (m_impl->window)
+        {
+            m_impl->window->set_fullscreen(fullscreen);
+        }
+    }
+
+    bool WebWindow::isFullscreen() const
+    {
+        std::lock_guard<std::mutex> lock(m_impl->mutex);
+        return m_impl->fullscreen;
     }
 
     void WebWindow::setSize(int width, int height)
@@ -460,9 +471,26 @@ namespace whiz
 
     void WebWindow::setDecorated(bool enabled)
     {
+        // 兼容旧接口：与 setWindowFrameState 等价
+        setWindowFrameState(enabled);
+    }
+
+    void WebWindow::setWindowFrameState(bool frame)
+    {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
-        m_impl->window->set_decorations(enabled ? saucer::window::decoration::full : saucer::window::decoration::none);
+        m_impl->frame = frame;
+        if (m_impl->window)
+        {
+            // frame=false 时使用 decoration::partial（而非 none）：去除标题栏/边框，
+            // 但保留窗口阴影与调整大小的能力。
+            m_impl->window->set_decorations(frame ? saucer::window::decoration::full : saucer::window::decoration::partial);
+        }
+    }
+
+    bool WebWindow::hasWindowFrame() const
+    {
+        std::lock_guard<std::mutex> lock(m_impl->mutex);
+        return m_impl->frame;
     }
 
     void WebWindow::setTitle(std::string_view title)
@@ -537,6 +565,8 @@ namespace whiz
             m_impl->window->set_min_size({m_impl->min_width, m_impl->min_height});
         }
         m_impl->window->set_resizable(m_impl->resizable);
+        m_impl->window->set_fullscreen(m_impl->fullscreen);
+        m_impl->window->set_decorations(m_impl->frame ? saucer::window::decoration::full : saucer::window::decoration::partial);
 
         // 应用图标：优先窗口图标，否则应用图标（文档 6.4 / 5）
         std::optional<saucer::icon> window_icon;
@@ -648,6 +678,19 @@ namespace whiz
             m_impl->pending_show = false;
             m_impl->cached_visible = true;
             m_impl->window_events.emit("show");
+        }
+    }
+
+    void WebWindow::openDevTools()
+    {
+        if (!m_impl->app || !m_impl->app->m_impl->permissions.devtools)
+        {
+            throw std::runtime_error("whiz: DevTools 未启用（permissions.devtools=false）");
+        }
+        std::lock_guard<std::mutex> lock(m_impl->mutex);
+        if (m_impl->view)
+        {
+            m_impl->view->set_dev_tools(true);
         }
     }
 } // namespace whiz

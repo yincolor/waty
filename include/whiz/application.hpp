@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -66,6 +67,9 @@ namespace whiz
 
         /// 应用路径
         std::string getPath(SysPath path) const;
+
+        /// 读取嵌入资源字节；path 为相对嵌入根目录的路径（如 "icon.png"），未找到返回 std::nullopt
+        std::optional<std::vector<std::uint8_t>> readEmbeddedFile(std::string_view path) const;
 
         // ---- 内部使用（使用者请勿调用） ----
         /// 触发应用事件（供 WebWindow / JS 桥内部使用）

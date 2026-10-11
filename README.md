@@ -83,6 +83,23 @@ cmake --build build -j
 ./build/my_app
 ```
 
+## 读取嵌入资源
+
+C++ 侧可用 `Application::readEmbeddedFile` 读取嵌入资源（含图片、字体等二进制文件）的原始字节：
+
+```cpp
+if (auto bytes = app.readEmbeddedFile("assets/icon.png"))
+{
+    // *bytes 为 std::vector<std::uint8_t>，是原始字节的副本
+}
+else
+{
+    // 未找到对应嵌入资源
+}
+```
+
+`path` 为相对嵌入根目录的路径（与 `loadFile` 的 `entry` 同一命名空间）；未找到时返回 `std::nullopt`。
+
 ## 网络说明
 
 依赖默认从 GitHub 直接下载。网络受限时请由使用者在本机配置代理，CMake 脚本不硬编码镜像或离线缓存：

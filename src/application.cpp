@@ -393,6 +393,18 @@ namespace whiz
         return {};
     }
 
+    std::optional<std::vector<std::uint8_t>> Application::readEmbeddedFile(std::string_view path) const
+    {
+        const auto content = detail::find_embedded_resource(path);
+        if (!content)
+        {
+            return std::nullopt;
+        }
+
+        const auto *begin = reinterpret_cast<const unsigned char *>(content->data());
+        return std::vector<std::uint8_t>(begin, begin + content->size());
+    }
+
     bool Application::requestSingleInstanceLock()
     {
         if (m_impl->single_instance)

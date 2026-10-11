@@ -223,7 +223,7 @@ int main() {
 
 **`Application`**：管理生命周期、窗口集合、全局事件、权限配置、事件循环任务。
 
-**`WebWindow`**：封装窗口 + WebView，提供 `loadFile` / `loadURL` / `setFullScreen` / `setSize` / `setMinSize` / `setResizable` / `id` / `windowEventHandle` / `ipcHandle` / `emit` / `show` / `openDevTools` / `showOpenDialog` / `showSaveDialog` / `showMessageBox` 以及完整的窗口控制方法。
+**`WebWindow`**：封装窗口 + WebView，提供 `loadFile` / `loadURL` / `setFullscreen` / `setWindowFrameState` / `setSize` / `setMinSize` / `setResizable` / `id` / `windowEventHandle` / `ipcHandle` / `emit` / `show` / `openDevTools` / `showOpenDialog` / `showSaveDialog` / `showMessageBox` 以及完整的窗口控制方法。
 
 ---
 
@@ -311,10 +311,14 @@ struct WebWindowOptions {
     int minWidth = 0;                        // 窗口最小宽度，默认 0
     int minHeight = 0;                       // 窗口最小高度，默认 0
     bool resizable = true;                   // 是否可调整尺寸
+    bool fullscreen = false;                 // 是否全屏，默认 false
+    bool frame = true;                       // 是否存在窗口边框，默认 true
     std::weak_ptr<WebWindow> parentWebWindow; // 父窗口，使用 weak_ptr 避免生命周期问题
     std::string_view icon;                   // 图标路径，可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径；留空则继承 ApplicationOptions.icon；若 ApplicationOptions.icon 也为空，则使用系统默认图标。
 };
 ```
+
+> `frame = false` 时窗口无标题栏/边框，但保留阴影与调整大小能力（对应 Saucer 的 `decoration::partial`）。
 
 **尺寸校验规则：**
 
@@ -546,9 +550,9 @@ public:
 };
 ```
 
-`Subscription` 是 RAII 对象，析构时自动取消订阅。不可拷贝，可移动。
+`Subscription` 不可拷贝，可移动。**只有显式调用 `unsubscribe()` 才会取消订阅；析构不会自动取消。** 若需要取消，请持有该句柄并在合适时机调用 `unsubscribe()`。
 
-`Subscription` 析构与 `unsubscribe()` 行为一致：若回调正在执行，不会中断当前回调，仅阻止后续触发。
+若回调正在执行，`unsubscribe()` 不会中断当前回调，仅阻止后续触发。
 
 #### 7.2.2 Event
 
@@ -592,7 +596,7 @@ public:
 
     // 为事件循环挂载任务。
     // 每轮事件循环触发一次，回调在 UI 线程执行。
-    // 返回的 Subscription 可用于取消挂载；析构时自动取消。
+    // 返回的 Subscription 可用于取消挂载；需取消时调用 unsubscribe()。
     // 用途：作为通用扩展点，将非 fd 驱动、无法直接接入平台主循环的事件源，
     //       周期性地接入 Whiz 的事件循环。
     // 注意：回调中不应执行耗时操作，否则会阻塞 UI 与 WebView。
@@ -606,6 +610,10 @@ public:
 
     // 应用路径
     std::string getPath(SysPath path) const;
+
+    // 读取嵌入资源字节；path 为相对嵌入根目录的路径（如 "assets/icon.png"）。
+    // 未找到对应资源时返回 std::nullopt；否则返回原始字节副本（std::vector<std::uint8_t>）。
+    std::optional<std::vector<std::uint8_t>> readEmbeddedFile(std::string_view path) const;
 
     // 单实例锁
     bool requestSingleInstanceLock();
@@ -701,7 +709,7 @@ auto sub = app.onEventLoopTick([] {
 
 - **调用时机**：每轮事件循环执行一次，回调在 UI 线程。
 - **注册时机**：可在 `app.run()` 之前或之后调用。在 `app.run()` 之前注册的任务，会在事件循环开始后立即参与调度。
-- **取消方式**：通过返回的 `Subscription` 取消。可跨线程调用 `unsubscribe()`，`Subscription` 析构时自动取消。行为与 `windowEventHandle` / `ipcHandle` 返回的 `Subscription` 一致。
+- **取消方式**：通过返回的 `Subscription` 的 `unsubscribe()` 取消（析构不会自动取消）。可跨线程调用。行为与 `windowEventHandle` / `ipcHandle` 返回的 `Subscription` 一致。
 - **执行顺序**：多个任务按注册顺序依次执行。若某个任务抛出异常，Whiz 会捕获并记录日志，不会中断其他任务。
 - **重入禁止（硬约束）**：任务回调中**禁止**再次注册或取消 `onEventLoopTick` 任务。Whiz 会在遍历期间检测这一行为并触发断言失败，程序将直接退出。如需动态增删，请通过 `std::async` 或 `emit` 调度到下一轮。
   > 违反此约束导致的迭代器失效、任务丢失或其他异常行为，Whiz 不保证可恢复。请务必遵守。
@@ -729,6 +737,19 @@ Saucer v8.x 未提供 `loop::hook` 之类的直接接口，Whiz 内部通过 Sau
 
 > **对 whiz-tray 等扩展库的说明**：系统托盘等外部事件源通常优先采用 fd 注册（Linux）、隐藏窗口消息（Windows）、`NSStatusItem`（macOS）等平台原生事件源机制接入主循环，`onEventLoopTick` **不是这类集成的必需品**，仅作为通用扩展点存在。它是给那些无法以 fd 形式接入平台主循环的事件源准备的兜底方案。
 
+#### 7.3.4 读取嵌入资源
+
+C++ 侧可用 `Application::readEmbeddedFile` 读取嵌入资源的原始字节，用于在运行时取回图片、字体等二进制文件（例如 `icon.png`）。
+
+```cpp
+std::optional<std::vector<std::uint8_t>> Application::readEmbeddedFile(std::string_view path) const;
+```
+
+- `path` 为相对嵌入根目录的路径（与 `loadFile` 的 `entry` 同一命名空间），如 `"assets/icon.png"`。
+- 未找到对应资源时返回 `std::nullopt`。
+- 命中时返回 `std::vector<std::uint8_t>`，是嵌入字节的副本，可安全地自行持有与修改。
+- 该接口在 C++ 侧可用，不受 `permissions.fs` 等 JS 权限控制（权限仅约束 JS 侧 `window.whiz.fs`）。
+
 ### 7.4 WebWindow
 
 ```cpp
@@ -748,7 +769,8 @@ public:
     void loadURL(std::string_view url);
 
     // 全屏
-    void setFullScreen(bool fullscreen);
+    void setFullscreen(bool fullscreen);
+    bool isFullscreen() const;
 
     // 尺寸
     void setSize(int width, int height);
@@ -770,7 +792,10 @@ public:
     void show();
     void focus();
     void setAlwaysOnTop(bool enabled);
-    void setDecorated(bool enabled);
+    void setDecorated(bool enabled);       // 与 setWindowFrameState 等价（兼容旧接口）
+    // frame=false 时移除标题栏/边框，但保留阴影与调整大小能力（decoration::partial）
+    void setWindowFrameState(bool frame);
+    bool hasWindowFrame() const;
     void setTitle(std::string_view title);
     std::string title() const;
     bool isMaximized() const;
@@ -1032,6 +1057,7 @@ await window.whiz.window.show();
 await window.whiz.window.focus();
 await window.whiz.window.setAlwaysOnTop(true);
 await window.whiz.window.setDecorated(false);
+await window.whiz.window.openDevTools();
 await window.whiz.window.isMaximized();
 await window.whiz.window.isMinimized();
 await window.whiz.window.isVisible();
@@ -1316,6 +1342,7 @@ declare global {
                 focus(): Promise<void>;
                 setAlwaysOnTop(enabled: boolean): Promise<void>;
                 setDecorated(enabled: boolean): Promise<void>;
+                openDevTools(): Promise<void>;
                 isMaximized(): Promise<boolean>;
                 isMinimized(): Promise<boolean>;
                 isVisible(): Promise<boolean>;
@@ -1372,7 +1399,7 @@ export {};
 
 ## 11. 调试与日志
 
-- **DevTools**：`ww->openDevTools()`，需在 `ApplicationOptions.permissions.devtools` 中启用。Release 下不做自动空操作，由使用者自行控制。
+- **DevTools**：C++ 侧 `ww->openDevTools()`，JS 侧 `window.whiz.window.openDevTools()`；均需在 `ApplicationOptions.permissions.devtools` 中启用（JS 侧同时受 `permissions.window` 控制）。未启用时 C++ 抛出异常、JS Promise reject。Release 下不做自动空操作，由使用者自行控制。
 - **统一日志**：C++ 侧日志输出到控制台；若设置了 `ApplicationOptions.logFile`，同时写入文件。相对路径相对于可执行文件目录，建议使用 `getPath` 拼接绝对路径。
 - **logFile 父目录不存在时**，自动循环创建多级目录，创建失败则记录警告并仅输出到控制台
 - **JS 日志转发**：当 `permissions.log = true` 时，JS 的 `console.log/warn/error` 会转发到 C++ 日志。
@@ -1398,7 +1425,7 @@ export {};
 | `BrowserWindow` | `WebWindow` | 窗口 + WebView 聚合 |
 | `loadURL(url)` | `loadURL(url)` | 直接对应，继承 Saucer 默认配置 |
 | `loadFile(path)` | `loadFile(entry)` | 入口为嵌入资源中的相对路径，禁止 `../` 跳出根 |
-| `setFullScreen(bool)` | `setFullScreen(bool)` | 直接对应 |
+| `setFullScreen(bool)` | `setFullscreen(bool)` | 直接对应 |
 | `ipcMain.handle` | `ww->ipcHandle(event, cb)` | C++/JS 互操作，异步 JSON，回调返回 `std::future<json>` |
 | `webContents.send` | `ww->emit` | C++ 主动推送 JS |
 | `app.quit()` | `app.quit()` | 直接对应 |
@@ -1484,7 +1511,7 @@ whiz/
 - `window.whiz.window` 窗口控制默认关闭，需 `permissions.window = true`。
 - `window.whiz.dialog` 默认关闭，需 `permissions.dialog = true`。文件选择对话框会将用户选择的完整文件系统路径暴露给 JS 环境。`showMessageBox` 不涉及文件系统路径，但仍是原生 UI 调用，受同一权限控制。
 - `showMessageBox` 通过 Saucer Native API 调用平台原生实现，不经过 WebView 渲染，因此不受 `loadURL` 安全策略的约束。
-- `DevTools` 默认关闭，生产环境请勿随意开启。权限关闭时，调用 `ww->openDevTools()` 会抛出异常，不会被静默忽略。
+- `DevTools` 默认关闭，生产环境请勿随意开启。权限关闭时，C++ 调用 `ww->openDevTools()` 会抛出异常、JS 调用 `window.whiz.window.openDevTools()` 会 reject，不会被静默忽略。
 - 图标路径解析会同时尝试嵌入资源和可执行文件目录，找不到时使用系统默认图标并记录日志。
 - IPC 请求回调（`ipcHandle`）在线程池中执行，注意线程安全，不要直接操作 UI。
 - 窗口事件回调（`windowEventHandle`）在 UI 线程执行。

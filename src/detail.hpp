@@ -167,7 +167,9 @@ namespace whiz
         int height     = 600;
         int min_width  = 0;
         int min_height = 0;
-        bool resizable = true;
+        bool resizable  = true;
+        bool fullscreen = false;
+        bool frame      = true;
         std::weak_ptr<WebWindow> parent;
         std::string icon;
 

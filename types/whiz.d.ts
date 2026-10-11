@@ -40,6 +40,7 @@ declare global {
                 focus(): Promise<void>;
                 setAlwaysOnTop(enabled: boolean): Promise<void>;
                 setDecorated(enabled: boolean): Promise<void>;
+                openDevTools(): Promise<void>;
                 isMaximized(): Promise<boolean>;
                 isMinimized(): Promise<boolean>;
                 isVisible(): Promise<boolean>;

@@ -1,6 +1,7 @@
 # 构建产物
 build/
 build*/
+test/
 
 # CMake 生成文件
 CMakeCache.txt

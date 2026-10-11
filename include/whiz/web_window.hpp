@@ -53,7 +53,8 @@ namespace whiz
         void loadURL(std::string_view url);
 
         // ---- 窗口状态与控制（阶段 2 实现） ----
-        void setFullScreen(bool fullscreen);
+        void setFullscreen(bool fullscreen);
+        bool isFullscreen() const;
         void setSize(int width, int height);
         void setMinSize(int width, int height);
         void setResizable(bool resizable);
@@ -72,6 +73,8 @@ namespace whiz
         void focus();
         void setAlwaysOnTop(bool enabled);
         void setDecorated(bool enabled);
+        void setWindowFrameState(bool frame);
+        bool hasWindowFrame() const;
         void setTitle(std::string_view title);
         std::string title() const;
         bool isMaximized() const;

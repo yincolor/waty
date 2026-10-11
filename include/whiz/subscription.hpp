@@ -7,7 +7,8 @@
 namespace whiz
 {
     /// 订阅句柄（见文档 7.2.1）。
-    /// RAII 对象，析构时自动取消订阅；不可拷贝，可移动；unsubscribe 可跨线程调用。
+    /// 不可拷贝，可移动；只有显式调用 unsubscribe() 才会取消订阅（析构不会自动取消）。
+    /// unsubscribe 可跨线程调用。
     class Subscription
     {
         struct State
@@ -33,10 +34,7 @@ namespace whiz
         Subscription(const Subscription &)            = delete;
         Subscription &operator=(const Subscription &) = delete;
 
-        ~Subscription()
-        {
-            unsubscribe();
-        }
+        ~Subscription() = default;
 
         /// 取消订阅。取消后回调不再触发；若回调正在执行，不会中断当前回调。
         void unsubscribe()

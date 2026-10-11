@@ -49,6 +49,8 @@ namespace whiz
         int minWidth   = 0;          // 窗口最小宽度，默认 0
         int minHeight  = 0;          // 窗口最小高度，默认 0
         bool resizable = true;       // 是否可调整尺寸
+        bool fullscreen = false;     // 是否全屏（默认非全屏）
+        bool frame      = true;      // 是否存在窗口边框（默认有边框）
 
         std::weak_ptr<WebWindow> parentWebWindow;  // 父窗口，使用 weak_ptr 避免生命周期问题
         std::string_view icon;                     // 图标路径；留空则继承 ApplicationOptions.icon

@@ -133,6 +133,7 @@ namespace whiz::detail
             focus: () => w("focus"),
             setAlwaysOnTop: (b) => w("setAlwaysOnTop", [b]),
             setDecorated: (b) => w("setDecorated", [b]),
+            openDevTools: () => w("openDevTools"),
             isMaximized: () => w("isMaximized"),
             isMinimized: () => w("isMinimized"),
             isVisible: () => w("isVisible")
@@ -267,13 +268,26 @@ namespace whiz::detail
             {
                 std::lock_guard<std::mutex> lock(impl.ipc_mutex);
                 const auto it = impl.ipc_handlers.find(event);
-                if (it == impl.ipc_handlers.end() || it->second.empty())
+                if (it == impl.ipc_handlers.end())
                 {
                     respond_error(impl, id, nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
                                                            {"message", "No handler registered for '" + event + "'"}});
                     return;
                 }
-                handler = it->second.front();  // TODO(doc-gap): 多个 handler 的调度策略
+
+                // 惰性清理已通过 unsubscribe() 取消的 handler，再取第一个存活者
+                auto &handlers = it->second;
+                std::erase_if(handlers, [](const auto &h) {
+                    std::lock_guard<std::mutex> lock(h->mutex);
+                    return !h->alive;
+                });
+                if (handlers.empty())
+                {
+                    respond_error(impl, id, nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
+                                                           {"message", "No handler registered for '" + event + "'"}});
+                    return;
+                }
+                handler = handlers.front();  // TODO(doc-gap): 多个 handler 的调度策略
             }
 
             const auto saucer_app = impl.saucer_app;
@@ -404,7 +418,22 @@ namespace whiz::detail
                 if (op == "show") { lock_window().show(); respond(impl, id, nlohmann::json(nullptr)); return; }
                 if (op == "focus") { lock_window().focus(); respond(impl, id, nlohmann::json(nullptr)); return; }
                 if (op == "setAlwaysOnTop") { lock_window().set_always_on_top(bool_arg(0)); respond(impl, id, nlohmann::json(nullptr)); return; }
-                if (op == "setDecorated") { lock_window().set_decorations(bool_arg(0) ? saucer::window::decoration::full : saucer::window::decoration::none); respond(impl, id, nlohmann::json(nullptr)); return; }
+                if (op == "setDecorated") { lock_window().set_decorations(bool_arg(0) ? saucer::window::decoration::full : saucer::window::decoration::partial); respond(impl, id, nlohmann::json(nullptr)); return; }
+                if (op == "openDevTools")
+                {
+                    // 复用 C++ 侧能力（WebWindow::openDevTools，含 permissions.devtools 校验）
+                    if (impl.app)
+                    {
+                        if (const auto window = impl.app->getWindow(impl.id))
+                        {
+                            (*window)->openDevTools();
+                            respond(impl, id, nlohmann::json(nullptr));
+                            return;
+                        }
+                    }
+                    respond_error(impl, id, nlohmann::json{{"name", "WhizWindowError"}, {"code", "WINDOW_INTERNAL"}, {"message", "window not found"}});
+                    return;
+                }
                 if (op == "isMaximized") { respond(impl, id, lock_window().maximized()); return; }
                 if (op == "isMinimized") { respond(impl, id, lock_window().minimized()); return; }
                 if (op == "isVisible") { respond(impl, id, lock_window().visible()); return; }
@@ -558,18 +587,5 @@ namespace whiz
             return;
         }
         detail::emit_to_js(*m_impl, event, data);
-    }
-
-    void WebWindow::openDevTools()
-    {
-        if (!m_impl->app || !m_impl->app->m_impl->permissions.devtools)
-        {
-            throw std::runtime_error("whiz: DevTools 未启用（permissions.devtools=false）");
-        }
-        std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (m_impl->view)
-        {
-            m_impl->view->set_dev_tools(true);
-        }
     }
 } // namespace whiz
