@@ -274,20 +274,19 @@ namespace whiz::detail
                                                            {"message", "No handler registered for '" + event + "'"}});
                     return;
                 }
+                handler = it->second;
+            }
 
-                // 惰性清理已通过 unsubscribe() 取消的 handler，再取第一个存活者
-                auto &handlers = it->second;
-                std::erase_if(handlers, [](const auto &h) {
-                    std::lock_guard<std::mutex> lock(h->mutex);
-                    return !h->alive;
-                });
-                if (handlers.empty())
-                {
-                    respond_error(impl, id, nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
-                                                           {"message", "No handler registered for '" + event + "'"}});
-                    return;
-                }
-                handler = handlers.front();  // TODO(doc-gap): 多个 handler 的调度策略
+            bool alive = true;
+            {
+                std::lock_guard<std::mutex> lock(handler->mutex);
+                alive = handler->alive;
+            }
+            if (!alive)
+            {
+                respond_error(impl, id, nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
+                                                       {"message", "No handler registered for '" + event + "'"}});
+                return;
             }
 
             const auto saucer_app = impl.saucer_app;
@@ -566,9 +565,29 @@ namespace whiz
         auto entry = std::make_shared<WebWindow::Impl::IpcHandlerEntry>();
         entry->callback = std::move(callback);
 
+        const std::string key(event);
         {
             std::lock_guard<std::mutex> lock(m_impl->ipc_mutex);
-            m_impl->ipc_handlers[std::string(event)].push_back(entry);
+            const auto it = m_impl->ipc_handlers.find(key);
+            if (it != m_impl->ipc_handlers.end())
+            {
+                bool alive = true;
+                {
+                    std::lock_guard<std::mutex> entry_lock(it->second->mutex);
+                    alive = it->second->alive;
+                }
+                if (alive)
+                {
+                    throw std::logic_error("Attempted to register a second handler for '" + key + "'");
+                }
+
+                // 已 unsubscribe 的 dead handler：直接覆盖，允许该事件名重新注册。
+                it->second = entry;
+            }
+            else
+            {
+                m_impl->ipc_handlers.emplace(key, entry);
+            }
         }
 
         return Subscription([entry] {

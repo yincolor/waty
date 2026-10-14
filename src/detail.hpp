@@ -205,7 +205,8 @@ namespace whiz
         };
 
         std::mutex ipc_mutex;
-        std::unordered_map<std::string, std::vector<std::shared_ptr<IpcHandlerEntry>>> ipc_handlers;
+        // 单 handler 模型：每个事件名至多一个 handler（见 20261014 修复文档 1.2）。
+        std::unordered_map<std::string, std::shared_ptr<IpcHandlerEntry>> ipc_handlers;
 
         // saucer 原生事件监听 id（用于 off）
         std::unordered_map<std::string, std::size_t> saucer_listeners;

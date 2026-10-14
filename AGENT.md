@@ -13,7 +13,7 @@ whiz 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架�
 | 核心语言 | C++23 |
 | 构建系统 | CMake 3.25+ |
 | 底层库 | Saucer（跨平台 WebView 封装） |
-| 前端嵌入 | `whiz_embed_resources` CMake 函数 |
+| 前端嵌入 | `whiz_embed` CMake 函数 |
 | 许可证 | GNU Affero General Public License v3.0 |
 
 ## 环境要求
@@ -40,7 +40,7 @@ g++-14 --version   # 或其他支持 C++23 的编译器
 ```
 whiz/
 ├── cmake/ # CMake 辅助模块
-│   └── whiz_embed_resources.cmake
+│   └── whiz_embed.cmake
 ├── web/ # 示例前端页面（参考用）
 │   └── index.html
 ├── DESIGN.md # 完整设计文档
@@ -50,7 +50,7 @@ whiz/
 └── test # 测试代码放在这里，避免污染其他地方;已经有一个whiz-app-template测试项目可以用于测试了，直接改这个即可，把测试样例中连接目标改为编译的新的静态库
 ```
 
-> 注：`cmake/whiz_embed_resources.cmake` 是提供给使用者的资源嵌入函数，位于 `whiz_SOURCE_DIR/cmake/` 路径下。
+> 注：`cmake/whiz_embed.cmake` 是提供给使用者的资源嵌入函数，位于 `whiz_SOURCE_DIR/cmake/` 路径下。
 
 ## 常用开发命令
 
@@ -148,11 +148,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(whiz)
 
-include("${whiz_SOURCE_DIR}/cmake/whiz_embed_resources.cmake")
-
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE whiz::whiz)
-whiz_embed_resources(my_app WEB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/web")
+
+# whiz_embed 在 FetchContent_MakeAvailable(whiz) 后可直接使用
+whiz_embed("${CMAKE_CURRENT_SOURCE_DIR}/web")
+target_link_libraries(my_app PRIVATE whiz::whiz whiz::embedded)
 ```
 
 ### 6. 提交前检查
@@ -248,5 +248,5 @@ sudo apt install libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev libjson-glib
 
 **Q：想更改嵌入的入口 HTML 文件？**
 
-修改 `whiz_embed_resources(my_app WEB_ROOT "path/to/web")` 中的 `WEB_ROOT` 路径，然后重新构建。
+修改 `whiz_embed("path/to/web")` 中的目录路径，然后重新构建。
 

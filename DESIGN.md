@@ -85,15 +85,14 @@ FetchContent_Declare(whiz
 FetchContent_MakeAvailable(whiz)
 
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE whiz)
 
-# 将前端构建产物嵌入到 my_app 可执行文件中
-whiz_embed_resources(my_app
-    WEB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist"
-)
+# 将前端构建产物生成独立资源目标（默认 whiz::embedded）
+whiz_embed("${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist")
+
+target_link_libraries(my_app PRIVATE whiz::whiz whiz::embedded)
 ```
 
-`whiz_embed_resources` 是 Whiz 提供的 CMake 函数，用于把指定目录整个嵌入到目标可执行文件中。入口 HTML 由 C++ 侧在运行时决定。
+`whiz_embed` 是 Whiz 提供的 CMake 函数，用于把指定目录整个嵌入到独立资源目标中。入口 HTML 由 C++ 侧在运行时决定。
 
 ### 4.2 最小 main.cpp
 
@@ -213,7 +212,7 @@ int main() {
 ### 4.5 使用者侧三步
 
 1. 构建前端，产物落到 `frontend/dist/`
-2. CMake 通过 `FetchContent` 引入 Whiz，并调用 `whiz_embed_resources` 嵌入资源
+2. CMake 通过 `FetchContent` 引入 Whiz，并调用 `whiz_embed` 嵌入资源
 3. C++ 里配置 `ApplicationOptions`、创建 `WebWindowOptions`，调用：
    `app.createWindow(...) → loadFile("...") → show() → app.run()`
 
@@ -229,17 +228,18 @@ int main() {
 
 ## 5. 资源嵌入机制
 
-Whiz 提供 CMake 函数 `whiz_embed_resources`：
+Whiz 提供 CMake 函数 `whiz_embed`：
 
 ```cmake
-whiz_embed_resources(<target>
-    WEB_ROOT <dir>
-)
+whiz_embed(<directory> [NAME <name>])
 ```
 
-1. 构建时扫描 `<dir>` 下的所有文件
-2. 生成 C++ 源文件，将文件内容作为二进制数据嵌入到 `<target>`
-3. 注册 `embedded://root/` scheme 供 WebView 访问
+1. 构建时扫描 `<directory>` 下的所有文件
+2. 生成 C++ 源文件，并创建一个独立资源目标（默认 `whiz::embedded`，可用 `NAME` 自定义，如 `whiz::ui`）
+3. 使用者通过 `target_link_libraries(my_app PRIVATE whiz::embedded)` 链接
+4. 注册 `embedded://root/` scheme 供 WebView 访问
+
+一个资源目标可被多个可执行目标链接，资源只编译一次。
 
 **关键特性：**
 
@@ -842,6 +842,8 @@ public:
 };
 ```
 
+> **IPC 单 handler 语义**：每个事件名只能注册一个 handler。同一事件名重复注册会抛出 `std::logic_error`（异常信息包含事件名）。通过 `Subscription::unsubscribe()` 取消注册；取消后该事件名可再次注册。已取消（未注册）的事件名被 `invoke` 时会返回 `IPC_HANDLER_NOT_FOUND` 错误，而非静默挂起。
+
 #### 7.4.1 窗口事件
 
 通过 `ww->windowEventHandle(...)` 注册，回调在 UI 线程执行，返回 `Subscription` 可用于取消。
@@ -1429,7 +1431,7 @@ export {};
 | `ipcMain.handle` | `ww->ipcHandle(event, cb)` | C++/JS 互操作，异步 JSON，回调返回 `std::future<json>` |
 | `webContents.send` | `ww->emit` | C++ 主动推送 JS |
 | `app.quit()` | `app.quit()` | 直接对应 |
-| `asar` 打包 | `whiz_embed_resources` | 资源嵌入二进制 |
+| `asar` 打包 | `whiz_embed` | 资源嵌入二进制 |
 | 前端构建 | 使用者自选 | Whiz 不介入 |
 | `fs` 模块 | `window.whiz.fs` | 独立桥接，需显式开启权限，无路径白名单 |
 | `os` 模块 | `window.whiz.os` | 需显式开启权限，含 `getPath`，全部异步 |
@@ -1466,7 +1468,7 @@ whiz/
 │   ├── js_bridge.cpp
 │   ├── fs_bridge.cpp
 │   └── dialog_bridge.cpp       # 对话框实现
-├── web/  # 默认示例前端，使用者需在CMake中用whiz_embed_resources指定前端根目录
+├── web/  # 默认示例前端，使用者需在CMake中用whiz_embed指定前端根目录
 │   └── index.html
 ├── types/
 │   └── whiz.d.ts  # TypeScript 全局声明

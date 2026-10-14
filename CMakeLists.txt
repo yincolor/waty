@@ -38,7 +38,7 @@ FetchContent_MakeAvailable(saucer nlohmann_json)
 # whiz 库
 # ---------------------------------------------------------------------------
 
-include(cmake/whiz_embed_resources.cmake)
+include(cmake/whiz_embed.cmake)
 
 add_library(whiz STATIC
     src/application.cpp

@@ -24,7 +24,7 @@ namespace whiz::detail
 {
     namespace
     {
-        // 使用 Meyers 单例，避免静态初始化顺序问题（whiz_embed_resources 生成的静态初始化器
+        // 使用 Meyers 单例，避免静态初始化顺序问题（whiz_embed 生成的静态初始化器
         // 在程序启动早期调用 register_embedded_resource，此时全局 map 可能尚未构造）。
         std::mutex &embed_mutex()
         {
@@ -204,7 +204,7 @@ namespace whiz
         {
             static std::once_flag once;
             std::call_once(once, [] {
-                // 仅在用户未通过 whiz_embed_resources 注册同名资源时，注入默认页。
+                // 仅在用户未通过 whiz_embed 注册同名资源时，注入默认页。
                 if (!detail::find_embedded_resource("index.html"))
                 {
                     detail::register_embedded_resource("index.html", g_default_index);

@@ -6,7 +6,7 @@
 ## 特性
 
 - 窗口 / WebView / IPC 抽象，贴近 Electron 的开发模型
-- 前端资源嵌入（`whiz_embed_resources`），入口 HTML 由 C++ 侧决定
+- 前端资源嵌入（`whiz_embed`），入口 HTML 由 C++ 侧决定
 - 常用桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框
 - 权限显式化：暴露给 JS 的能力默认关闭（IPC 基础能力默认开启）
 - 作为 CMake 库，可通过 `FetchContent` 集成
@@ -67,12 +67,12 @@ FetchContent_Declare(whiz
     GIT_TAG v3.4.2)
 FetchContent_MakeAvailable(whiz)
 
-# 引入 whiz 提供的资源嵌入函数
-include("${whiz_SOURCE_DIR}/cmake/whiz_embed_resources.cmake")
-
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE whiz::whiz)
-whiz_embed_resources(my_app WEB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/web")
+
+# whiz_embed 在 FetchContent_MakeAvailable(whiz) 后可直接使用
+whiz_embed("${CMAKE_CURRENT_SOURCE_DIR}/web")
+
+target_link_libraries(my_app PRIVATE whiz::whiz whiz::embedded)
 ```
 
 在项目里准备 `web/index.html`（本仓库 `web/` 目录提供了一个可参考的示例页面），然后：
@@ -99,6 +99,15 @@ else
 ```
 
 `path` 为相对嵌入根目录的路径（与 `loadFile` 的 `entry` 同一命名空间）；未找到时返回 `std::nullopt`。
+
+## IPC
+
+C++ 侧通过 `WebWindow::ipcHandle` 响应前端的 `window.whiz.ipc.invoke(event, ...)`：
+
+- **每个事件名只能注册一个 handler。**
+- **同一事件名重复注册会抛出 `std::logic_error`**（异常信息包含事件名）。
+- **通过返回的 `Subscription::unsubscribe()` 取消注册**；取消后该事件名可再次注册。
+- 回调在线程池执行，返回 `std::future<nlohmann::json>` 以异步响应。
 
 ## 网络说明
 

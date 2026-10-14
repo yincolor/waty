@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-// 内部头文件：供 whiz_embed_resources 生成的代码调用，向嵌入式资源注册表注入内容。
+// 内部头文件：供 whiz_embed 生成的代码调用，向嵌入式资源注册表注入内容。
 // 使用者不应直接包含此头文件（属于 whiz 内部机制）。
 namespace whiz::detail
 {

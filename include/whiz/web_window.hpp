@@ -84,6 +84,8 @@ namespace whiz
         // ---- 事件 / IPC / 对话框（阶段 2 实现） ----
         Subscription windowEventHandle(std::string_view event,
                                        std::function<void(Event &, const nlohmann::json &)> callback);
+        // IPC 请求处理。回调在线程池执行，返回 future 表示异步响应。
+        // 每个事件名只能注册一个 handler；重复注册会抛出 std::logic_error。
         Subscription ipcHandle(std::string_view event,
                                std::function<std::future<nlohmann::json>(const nlohmann::json &)> callback);
         void emit(std::string_view event, const nlohmann::json &data);
