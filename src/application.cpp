@@ -6,7 +6,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cassert>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -100,9 +103,50 @@ namespace waty
 #endif
             return argv;
         }
+
+        // 目录名严格校验（appName / organizationName 共用）：
+        // 非空、1-64 字符、^[A-Za-z0-9_]+$，且不得为 Windows 保留设备名。
+        bool is_valid_directory_name(std::string_view name)
+        {
+            if (name.empty() || name.size() > 64)
+            {
+                return false;
+            }
+
+            for (const unsigned char c : name)
+            {
+                const bool ok =
+                    (c >= '0' && c <= '9') ||
+                    (c >= 'A' && c <= 'Z') ||
+                    (c >= 'a' && c <= 'z') ||
+                    c == '_';
+                if (!ok)
+                {
+                    return false;
+                }
+            }
+
+            std::string upper;
+            upper.reserve(name.size());
+            for (const unsigned char c : name)
+            {
+                upper.push_back(static_cast<char>(std::toupper(c)));
+            }
+
+            static constexpr std::array<std::string_view, 22> reserved = {
+                "CON", "PRN", "AUX", "NUL",
+                "COM1", "COM2", "COM3", "COM4", "COM5",
+                "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
+                "LPT6", "LPT7", "LPT8", "LPT9"
+            };
+
+            const std::string_view upper_view(upper);
+            return std::find(reserved.begin(), reserved.end(), upper_view) == reserved.end();
+        }
     } // namespace
 
-    std::string detail::executable_dir()
+    std::string detail::executable_path()
     {
 #if defined(__linux__)
         char buffer[PATH_MAX];
@@ -110,28 +154,62 @@ namespace waty
         if (n > 0)
         {
             buffer[n] = '\0';
-            return std::filesystem::path(buffer).parent_path().string();
+            return buffer;
         }
 #endif
-        return std::filesystem::current_path().string();
+#if defined(_WIN32)
+        // TODO(platform): GetModuleFileNameW 返回完整路径，需转 UTF-8。
+#endif
+#if defined(__APPLE__)
+        // TODO(platform): _NSGetExecutablePath 返回完整路径。
+#endif
+        return {};
+    }
+
+    std::string detail::executable_dir()
+    {
+        const auto exe = detail::executable_path();
+        if (exe.empty())
+        {
+            return std::filesystem::current_path().string();
+        }
+        return std::filesystem::path(exe).parent_path().string();
     }
 
     Application::Application(const ApplicationOptions &options)
         : m_impl(std::make_unique<Impl>())
     {
-        m_impl->app_name    = std::string(options.appName);
-        m_impl->icon        = std::string(options.icon);
+        if (!is_valid_directory_name(options.appName))
+        {
+            detail::log_message("error", "waty: ApplicationOptions.appName 非法: '" + std::string(options.appName) + "'");
+            throw std::invalid_argument(
+                "waty: ApplicationOptions.appName 必须非空、匹配 ^[A-Za-z0-9_]+$、长度不超过 64，"
+                "且不得为 Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9）。"
+                "实际值: " + std::string(options.appName));
+        }
+        if (!is_valid_directory_name(options.organizationName))
+        {
+            detail::log_message("error", "waty: ApplicationOptions.organizationName 非法: '" + std::string(options.organizationName) + "'");
+            throw std::invalid_argument(
+                "waty: ApplicationOptions.organizationName 必须非空、匹配 ^[A-Za-z0-9_]+$、长度不超过 64，"
+                "且不得为 Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9）。"
+                "实际值: " + std::string(options.organizationName));
+        }
+
+        m_impl->app_name          = std::string(options.appName);
+        m_impl->organization_name = std::string(options.organizationName);
+        m_impl->icon              = std::string(options.icon);
         m_impl->permissions = options.permissions;
         if (options.logFile)
         {
             m_impl->log_file = std::string(*options.logFile);
         }
-
-        std::string id = m_impl->app_name;
-        if (id.empty())
+        if (options.webviewStoragePath && !options.webviewStoragePath->empty())
         {
-            id = "waty-app";  // TODO(doc-gap): 文档未规定 appName 为空时的行为
+            m_impl->webview_storage_path = std::string(*options.webviewStoragePath);
         }
+
+        const std::string id = m_impl->app_name;
 
         // quit_on_last_window_closed 设为 false：由 waty 自行处理 window-all-closed 默认行为，
         // 以保证 before-quit / will-quit / quit 生命周期事件完整触发。
@@ -353,42 +431,103 @@ namespace waty
 
     std::string Application::getPath(SysPath path) const
     {
-        // TODO(doc-gap): 路径约定参考 Electron/Node.js（Linux）。
-        const char *home_env = std::getenv("HOME");
-        const std::string home = home_env ? home_env : std::string{};
         const std::string &name = m_impl->app_name;
 
+#if defined(_WIN32)
+        const char *home_env = std::getenv("USERPROFILE");
+#else
+        const char *home_env = std::getenv("HOME");
+#endif
+        const std::string home = home_env ? home_env : std::string{};
+
         const auto xdg_config = [&]() -> std::string {
-            if (const char *v = std::getenv("XDG_CONFIG_HOME"); v && *v)
+#if defined(_WIN32)
+            if (const char *v = std::getenv("APPDATA"); v && *v)
+            {
+                return v;
+            }
+            return home + "\\AppData\\Roaming";
+#elif defined(__APPLE__)
+            return home + "/Library/Preferences";
+#else
+            if (const char *v = std::getenv("XDG_CONFIG_HOME"); v && *v && v[0] == '/')
             {
                 return v;
             }
             return home + "/.config";
+#endif
         };
         const auto xdg_cache = [&]() -> std::string {
-            if (const char *v = std::getenv("XDG_CACHE_HOME"); v && *v)
+#if defined(_WIN32)
+            if (const char *v = std::getenv("LOCALAPPDATA"); v && *v)
+            {
+                return v;
+            }
+            return home + "\\AppData\\Local";
+#elif defined(__APPLE__)
+            return home + "/Library/Caches";
+#else
+            if (const char *v = std::getenv("XDG_CACHE_HOME"); v && *v && v[0] == '/')
             {
                 return v;
             }
             return home + "/.cache";
+#endif
+        };
+        const auto xdg_data = [&]() -> std::string {
+#if defined(_WIN32)
+            if (const char *v = std::getenv("LOCALAPPDATA"); v && *v)
+            {
+                return v;
+            }
+            return home + "\\AppData\\Local";
+#elif defined(__APPLE__)
+            return home + "/Library/Application Support";
+#else
+            if (const char *v = std::getenv("XDG_DATA_HOME"); v && *v && v[0] == '/')
+            {
+                return v;
+            }
+            return home + "/.local/share";
+#endif
+        };
+
+        const std::string &org = m_impl->organization_name;
+
+        // 在基础目录下按「组织或发布者 / 应用名」组织用户数据，
+        // 默认组织名为 waty；Windows 使用反斜杠，其余平台使用正斜杠。
+#if defined(_WIN32)
+        constexpr char k_path_sep = '\\';
+#else
+        constexpr char k_path_sep = '/';
+#endif
+        const auto join_app_path = [&](const std::string &base) -> std::string {
+            return base + k_path_sep + org + k_path_sep + name;
         };
 
         switch (path)
         {
-            case SysPath::UserData:  return xdg_config() + "/" + name;
+            case SysPath::AppData:    return join_app_path(xdg_data());
+            case SysPath::Config:     return join_app_path(xdg_config());
             case SysPath::Temp: {
+#if defined(_WIN32)
+                if (const char *v = std::getenv("TEMP"); v && *v) return v;
+                if (const char *v = std::getenv("TMP"); v && *v) return v;
+                return home + "\\AppData\\Local\\Temp";
+#else
                 if (const char *v = std::getenv("TMPDIR"); v && *v)
                 {
                     return v;
                 }
                 return "/tmp";
+#endif
             }
             case SysPath::Downloads: return home + "/Downloads";
             case SysPath::Documents: return home + "/Documents";
-            case SysPath::AppDir:    return detail::executable_dir();
+            case SysPath::Executable: return detail::executable_path();
             case SysPath::Home:      return home;
-            case SysPath::Cache:     return xdg_cache() + "/" + name;
-            case SysPath::Logs:      return xdg_config() + "/" + name + "/logs";
+            case SysPath::Cache:     return join_app_path(xdg_cache());
+            case SysPath::Logs:      return join_app_path(xdg_config()) + k_path_sep + "logs";
         }
         return {};
     }
@@ -413,7 +552,7 @@ namespace waty
         }
 
 #if defined(__linux__)
-        const std::string user_data = getPath(SysPath::UserData);
+        const std::string user_data = getPath(SysPath::Config);
         std::error_code ec;
         std::filesystem::create_directories(user_data, ec);
 

@@ -16,7 +16,7 @@ declare global {
                 platform(): Promise<'win32' | 'darwin' | 'linux'>;
                 arch(): Promise<'x64' | 'arm64'>;
                 homedir(): Promise<string>;
-                getPath(path: 'userData' | 'temp' | 'downloads' | 'documents' | 'appDir' | 'home' | 'cache' | 'logs'): Promise<string>;
+                getPath(path: 'appData' | 'config' | 'temp' | 'downloads' | 'documents' | 'executable' | 'home' | 'cache' | 'logs'): Promise<string>;
             };
             fs?: {
                 readFile(path: string): Promise<Uint8Array>;

@@ -70,6 +70,14 @@
 
 > **关于 saucer/desktop**：Saucer 的官方模块（包括 `desktop`、`pdf`、`loop`）随主库一起发布，版本与 Saucer 主库保持一致。使用 Saucer v8.x 时，`saucer/desktop` 自动为对应版本，无需单独指定版本号。自 Saucer v5.0.0 起，桌面相关功能正式移入 `saucer/desktop` 模块。
 
+**WebView 数据目录：**
+
+- Waty 默认将 Saucer WebView 运行时数据保存到符合 XDG 规范的用户数据目录，避免在当前工作目录生成 `.saucer`。
+- Linux 默认路径：`$XDG_DATA_HOME/<organizationName>/<appName>/webview`；`<organizationName>` 默认为 `waty`，因此默认值为 `$XDG_DATA_HOME/waty/<appName>/webview`。若 `XDG_DATA_HOME` 未设置或不是绝对路径，回退到 `~/.local/share/waty/<appName>/webview`（默认 organizationName）。
+- 在 WebKitGTK 后端，Saucer 的 `storage_path` 是 Cookie 持久化 SQLite 文件路径，Waty 默认使用 `<AppData>/webview/cookies.sqlite`；在 WebView2 / Qt 后端为目录路径。
+- Windows 默认路径：`%LOCALAPPDATA%\<organizationName>\<appName>\WebView2`（默认 organizationName 为 `waty`）。
+- macOS 默认路径：`~/Library/Application Support/<organizationName>/<appName>/WebView`（默认 organizationName 为 `waty`），但 WKWebView 可能使用 UUID 关联数据，实际存储位置不完全受 `storage_path` 控制。
+
 ---
 
 ## 4. 快速开始
@@ -101,7 +109,7 @@ target_link_libraries(my_app PRIVATE waty::waty waty::embedded)
 
 int main() {
     waty::ApplicationOptions appOpts;
-    appOpts.appName = "My App";
+    appOpts.appName = "My_App";
 
     waty::Application app(appOpts);
 
@@ -125,7 +133,7 @@ int main() {
 
 int main() {
     waty::ApplicationOptions appOpts;
-    appOpts.appName = "My App";
+    appOpts.appName = "My_App";
     appOpts.icon = "assets/icon.png";          // 可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径
     appOpts.permissions.os = true;             // 启用 JS 系统信息 + getPath
     appOpts.permissions.dialog = true;         // 启用 JS 原生对话框
@@ -195,7 +203,7 @@ ww->showMessageBox(msgOpts, [](waty::MessageBoxResult result) {
 ```cpp
 int main() {
     waty::ApplicationOptions appOpts;
-    appOpts.appName = "My App";
+    appOpts.appName = "My_App";
     waty::Application app(appOpts);
 
     if (!app.requestSingleInstanceLock()) {
@@ -292,14 +300,40 @@ struct PermissionOptions {
 
 ```cpp
 struct ApplicationOptions {
-    std::string_view appName;                 // 应用名称 或 项目名称
+    std::string_view appName;                 // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_]+$，1-64 字符）
+    std::string_view organizationName = "waty"; // 组织或发布者名称；用于用户数据目录拼接；校验同 appName
     std::string_view icon;                    // 图标路径，可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径；留空则应用无自定义图标，使用系统默认图标。
     std::optional<std::string_view> logFile;  // 日志文件路径。相对路径相对于可执行文件目录；规范上建议传绝对路径，可用 getPath 拼接
+
+    // WebView 运行时数据目录。留空时默认使用 getPath(SysPath::AppData) / "webview"。
+    // Linux: $XDG_DATA_HOME/<organizationName>/<appName>/webview，默认 ~/.local/share/waty/<appName>/webview。
+    // Windows: %LOCALAPPDATA%\<organizationName>\<appName>\WebView2。
+    // macOS: ~/Library/Application Support/<organizationName>/<appName>/WebView。
+    std::optional<std::string_view> webviewStoragePath;
+
     PermissionOptions permissions;            // JS 权限配置
 };
 ```
 
 > **字符串生命周期**：所有 `std::string_view` 字段在内部会立即拷贝为 `std::string`，调用者无需担心生命周期问题。
+
+> **`appName` 校验规则**：
+>
+> `ApplicationOptions.appName` 会参与用户数据目录路径拼接，必须满足以下条件：
+>
+> - 非空；
+> - 仅允许数字 `0-9`、英文字母 `A-Z` / `a-z`、下划线 `_`；
+> - 必须匹配正则 `^[A-Za-z0-9_]+$`；
+> - 建议长度不超过 64；
+> - 不得为 Windows 保留设备名（大小写不敏感）：`CON`、`PRN`、`AUX`、`NUL`、`COM1`–`COM9`、`LPT1`–`LPT9`。
+>
+> 非法时，`Application` 构造函数抛出 `std::invalid_argument`，异常信息包含规则说明与实际传入值。
+>
+> 若未来需要支持中文、空格、连字符等友好显示名，应新增独立的显示名字段，而不是放宽 `appName`。
+
+> **`organizationName` 校验规则**：与 `appName` 完全一致（非空、`^[A-Za-z0-9_]+$`、1-64 字符、拒绝 Windows 保留设备名）。`organizationName` 默认值为 `waty`，并参与用户数据目录路径拼接。非法时 `Application` 构造函数同样抛出 `std::invalid_argument`。
+
+> **`webviewStoragePath` 说明**：`webviewStoragePath` 在内部会立即拷贝为 `std::string`，调用者无需担心生命周期。若显式设置，Waty 不再自动推导路径；若路径父目录创建失败，记录警告并回退 Saucer 默认行为。
 
 ### 6.4 WebWindowOptions
 
@@ -315,10 +349,17 @@ struct WebWindowOptions {
     bool frame = true;                       // 是否存在窗口边框，默认 true
     std::weak_ptr<WebWindow> parentWebWindow; // 父窗口，使用 weak_ptr 避免生命周期问题
     std::string_view icon;                   // 图标路径，可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径；留空则继承 ApplicationOptions.icon；若 ApplicationOptions.icon 也为空，则使用系统默认图标。
+
+    // 当前窗口的 WebView 运行时数据目录。
+    // 留空时继承 ApplicationOptions.webviewStoragePath；
+    // 若两者都为空，则使用默认平台数据目录。
+    std::optional<std::string_view> storagePath;
 };
 ```
 
 > `frame = false` 时窗口无标题栏/边框，但保留阴影与调整大小能力（对应 Saucer 的 `decoration::partial`）。
+
+> **`storagePath` 说明**：当前窗口的 WebView 运行时数据目录。留空时继承 `ApplicationOptions.webviewStoragePath`；若两者都为空，则使用默认平台数据目录。在 WebKitGTK 后端，Saucer 的 `storage_path` 是 Cookie 持久化 SQLite 文件路径，Waty 默认会使用 `<AppData>/webview/cookies.sqlite`；在 WebView2 / Qt 后端为目录路径。
 
 **尺寸校验规则：**
 
@@ -675,14 +716,19 @@ app.on("window-all-closed", [&](waty::Event& e, const nlohmann::json&) {
 
 ```cpp
 enum class SysPath {
-    UserData,
+    AppData,      // XDG_DATA_HOME/<organizationName>/<appName>/
+    Config,       // XDG_CONFIG_HOME/<organizationName>/<appName>/，原 UserData
     Temp,
     Downloads,
     Documents,
-    AppDir,
+    Executable,   // 可执行文件完整路径（含文件名），原 AppDir
     Home,
-    Cache,
-    Logs
+    Cache,        // XDG_CACHE_HOME/<organizationName>/<appName>/
+    Logs,
+
+    // deprecated aliases（保留源码兼容）
+    UserData = Config,
+    AppDir = Executable,
 };
 
 std::string Application::getPath(SysPath path) const;
@@ -691,6 +737,18 @@ std::string Application::getPath(SysPath path) const;
 JS 侧对应 `window.waty.os.getPath(...)`，受 `permissions.os` 控制，且为异步 API。
 
 `Application::getPath` 在 C++ 侧不受 `permissions.os` 影响；该权限仅控制 JS 侧 `window.waty.os` 是否可用。
+
+| `SysPath` | Linux | Windows | macOS |
+|---|---|---|---|
+| `AppData` | `$XDG_DATA_HOME/<organizationName>/<appName>`，默认 `~/.local/share/waty/<appName>` | `%LOCALAPPDATA%\<organizationName>\<appName>` | `~/Library/Application Support/<organizationName>/<appName>` |
+| `Config` | `$XDG_CONFIG_HOME/<organizationName>/<appName>`，默认 `~/.config/waty/<appName>` | `%APPDATA%\<organizationName>\<appName>` | `~/Library/Preferences/<organizationName>/<appName>` |
+| `Executable` | `/proc/self/exe` 解析后的完整路径 | `GetModuleFileNameW` 返回的完整路径 | `_NSGetExecutablePath` / `NSBundle` 返回的完整路径 |
+
+> `SysPath::Config` 对应原 `UserData`，因为其 Linux 实现返回 `XDG_CONFIG_HOME` 下的路径。
+> `SysPath::Executable` 对应原 `AppDir`，但语义从“应用目录”改为“可执行文件完整路径（含文件名）”。
+> `Executable` 在应用启动时获取并缓存；获取失败时返回空字符串并记录警告。
+> `AppData` 是 XDG 数据目录，不等同于 Electron 的 `appData`。Electron 的 `userData` 在 Linux 上对应本项目的 `Config`。
+> 由于 `appName` 已通过严格校验，不会出现路径穿越、非法字符或平台保留名问题。
 
 ### 7.3.3 事件循环任务（`onEventLoopTick`）
 
@@ -987,8 +1045,20 @@ await window.waty.os.arch();     // 'x64' | 'arm64' | ...
 await window.waty.os.homedir();  // '/home/username/'
 
 // 应用路径
-await window.waty.os.getPath("userData" | "temp" | "downloads" | "documents" | "appDir" | "home" | "cache" | "logs");
+await window.waty.os.getPath("appData");
+await window.waty.os.getPath("config");
+await window.waty.os.getPath("temp");
+await window.waty.os.getPath("downloads");
+await window.waty.os.getPath("documents");
+await window.waty.os.getPath("executable");
+await window.waty.os.getPath("home");
+await window.waty.os.getPath("cache");
+await window.waty.os.getPath("logs");
 ```
+
+- `"config"` 替代旧 `"userData"`，Linux 下返回 `~/.config/<organizationName>/<appName>`（默认 `~/.config/waty/<appName>`）。
+- `"executable"` 替代旧 `"appDir"`，返回可执行文件完整路径（含文件名）。
+- 旧值 `"userData"` / `"appDir"` 仍可用，但已废弃，C++ 侧会记录 deprecated 警告并映射到 `config` / `executable`。
 
 ### 8.3 FS（需 `permissions.fs.read` / `permissions.fs.write`）
 
@@ -1320,7 +1390,7 @@ declare global {
                 platform(): Promise<'win32' | 'darwin' | 'linux'>;
                 arch(): Promise<'x64' | 'arm64'>;
                 homedir(): Promise<string>;
-                getPath(path: 'userData' | 'temp' | 'downloads' | 'documents' | 'appDir' | 'home' | 'cache' | 'logs'): Promise<string>;
+                getPath(path: 'appData' | 'config' | 'temp' | 'downloads' | 'documents' | 'executable' | 'home' | 'cache' | 'logs'): Promise<string>;
             };
             fs?: {
                 readFile(path: string): Promise<Uint8Array>;
@@ -1417,6 +1487,14 @@ export {};
 
 - **对话框诊断**：`showMessageBox` 在各平台的实现路径不同（详见 8.5.3），Waty 会在初始化时记录当前使用的原生 API、GTK 版本（Linux），以及当前平台是否支持 `checkboxLabel`，便于排查外观/行为差异。
 - **事件循环任务诊断**：`onEventLoopTick` 任务数量会随日志级别输出；任务回调中抛出的异常会被捕获并记录，便于定位接入的外部事件源问题。
+- **WebView 数据目录诊断**：启动或创建 WebView 时，记录最终使用的 `storage_path`。
+  - 若使用默认 XDG 路径，记录 `XDG_DATA_HOME` 是否有效、最终解析出的绝对路径。
+  - 若目录创建失败，记录警告并说明已回退 Saucer 默认行为。
+  - 不因 WebView 数据目录创建失败而阻止应用启动。
+- **非法 `appName` 诊断**：`Application` 构造时若 `appName` 非法，记录错误日志并抛出 `std::invalid_argument`。日志应包含实际值、校验规则和失败原因。
+- **非法 `organizationName` 诊断**：与 `appName` 相同；若 `organizationName` 非法，记录错误日志并抛出 `std::invalid_argument`，日志包含实际值与校验规则。
+- **`SysPath::Executable` 获取失败诊断**：若无法获取可执行文件完整路径，记录警告并返回空字符串。
+- **旧 `SysPath` 值诊断**：使用 `UserData` / `AppDir` 时记录 deprecated 警告，提示改用 `Config` / `Executable`。
 
 ---
 
@@ -1440,6 +1518,9 @@ export {};
 | `dialog.showSaveDialog` | `window.waty.dialog.showSaveDialog` | 同上 |
 | `dialog.showMessageBox` | `window.waty.dialog.showMessageBox` | 基于 Saucer Native API，平台原生实现 |
 | 单实例锁 | `app.requestSingleInstanceLock()` | 直接对应，返回 false 应立即 `app.quit()` |
+| `app.getPath('userData')` | `getPath(SysPath::Config)` / `os.getPath("config")` | Linux 下均指向 `~/.config/<organizationName>/<appName>` 风格路径（默认 `waty`） |
+| `app.getPath('exe')` | `getPath(SysPath::Executable)` / `os.getPath("executable")` | 返回可执行文件完整路径（含文件名） |
+| `app.getPath('appData')` | 不等同于 `SysPath::AppData` | Waty 的 `AppData` 是 XDG 数据目录；Electron 的 `appData` 更接近 Waty 的 `Config` 父目录 |
 | `app.on('window-all-closed', ...)` | `app.on("window-all-closed", ...)` + `Event::preventDefault()` | Waty 保留平台默认；可用 `preventDefault()` 阻止默认退出。Electron 无 `preventDefault`，通常由监听器条件调用 `app.quit()`。 |
 
 > Waty 额外提供 `ipc.createInvoker` 用于自定义超时与取消，Electron 对应能力需通过第三方或自行实现。
@@ -1492,6 +1573,8 @@ waty/
 - 原生消息框对话框，基于 Saucer Native API
 - 窗口控制、单实例锁
 - 应用退出默认行为的事件级控制（`window-all-closed` 可 `preventDefault`）
+- 默认将 WebView 运行时数据保存到符合 XDG 规范的用户数据目录
+- 允许通过 `ApplicationOptions.webviewStoragePath` / `WebWindowOptions.storagePath` 覆盖默认路径
 
 **Waty 不提供：**
 
@@ -1503,6 +1586,9 @@ waty/
 - C++ 侧 IPC 取消令牌（如需真正取消 C++ 任务，由使用者自行实现）
 - 自定义 HTML 对话框渲染（由前端框架负责）
 - 平台原生事件源（如 fd 监听、隐藏窗口消息）的直接封装；如外部事件源能以 fd 形式接入平台主循环，应由对应扩展库自行完成，Waty 仅提供 `onEventLoopTick` 作为通用兜底
+- 不自动迁移旧 `.saucer` 目录
+- 不自动清理 WebView 缓存、Cookie、LocalStorage
+- 不保证 macOS 下 WKWebView 数据完全落在指定 `storage_path`
 
 ---
 
@@ -1526,6 +1612,14 @@ waty/
 - JS 侧超时或取消后，C++ 侧 future 仍会执行到完成，结果被丢弃；Waty 不提供 C++ 侧取消令牌，如需真正取消，请由使用者在回调内自行实现。
 - Linux 上 GTK 版本低于 4.10 时，`showMessageBox` 会回退到旧版 API。如果应用对对话框外观有严格要求，请在使用者文档中明确标注 GTK 4.10+ 为推荐版本。
 - 若在 `window-all-closed` 中阻止默认退出，应用可能继续驻留，需自行管理退出时机与单实例锁释放。
+- WebView 运行时数据可能包含 Cookie、LocalStorage、缓存等敏感信息。Waty 默认将其放入用户数据目录，建议在 Linux 上确保目录权限为仅当前用户可访问（如 `0700`）。
+- `storage_path` 由 C++ 侧控制，不通过 JS 暴露；JS 侧仅可通过 `permissions.os` 下的 `getPath("appData")` 获取应用数据目录。
+- 若用户显式设置 `webviewStoragePath`，应自行确保路径可写且权限合理。
+- macOS 上 WKWebView 可能使用 UUID 关联数据，`storage_path` 不保证完全控制实际存储位置。
+- `ApplicationOptions.appName` 会参与目录路径拼接，因此必须严格限制为 `[A-Za-z0-9_]+`，并拒绝 Windows 保留设备名。Waty 不做静默净化，非法输入直接抛出 `std::invalid_argument`。
+- `ApplicationOptions.organizationName` 与 `appName` 采用相同严格校验规则，并同样用于目录路径拼接；默认值为 `waty`。
+- `getPath("executable")` 会暴露可执行文件完整路径，可能包含安装目录、用户名等信息，受 `permissions.os` 控制，默认关闭。
+- `getPath("config")` 返回应用配置目录，可能包含用户配置，受 `permissions.os` 控制。
 
 ---
 
@@ -1537,3 +1631,13 @@ waty/
 - **实现约定**：`onEventLoopTick` 任务使用 `std::vector` 有序存储；取消采用标记法（`alive` 标志 + 遍历结束后统一 `erase`）；`unsubscribe` 跨线程行为与 `windowEventHandle` / `ipcHandle` 一致；遍历期间禁止注册/取消，违反会触发断言失败并退出程序。
 - **文档**：在 7.1 线程模型、7.3 Application、11 调试与日志、12 与 Electron 对照、14 设计边界、15 安全说明等章节同步更新。
 - **变更**：`window-all-closed` 事件支持 `Event::preventDefault()` 阻止默认退出。非 macOS 下阻止后应用保持活跃；macOS 默认不退出，`preventDefault()` 无额外效果。文档同步更新 7.2.2、7.3、7.3.1、12、14。
+- **新增** `SysPath::AppData`：应用数据目录。Linux 映射到 `$XDG_DATA_HOME/<organizationName>/<appName>`，默认 `~/.local/share/waty/<appName>`。
+- **新增** `ApplicationOptions.organizationName`：组织或发布者名称，用于用户数据目录拼接；默认值 `waty`；校验规则同 `appName`。
+- **新增** `ApplicationOptions.webviewStoragePath`：WebView 运行时数据目录，留空时默认使用 `getPath(SysPath::AppData) / "webview"`。
+- **新增** `WebWindowOptions.storagePath`：单窗口覆盖 WebView 运行时数据目录。
+- **变更** 默认 WebView `storage_path` 不再使用当前工作目录下的 `.saucer`，改为平台用户数据目录。
+- **新增** `ApplicationOptions.appName` 严格校验：仅允许数字、英文字母大小写、下划线，正则 `^[A-Za-z0-9_]+$`，并拒绝 Windows 保留设备名。
+- **变更** `appName` 不再做静默净化；非法时 `Application` 构造函数抛出 `std::invalid_argument`。
+- **变更** `SysPath::UserData` 重命名为 `SysPath::Config`：因其实现返回 `XDG_CONFIG_HOME` 目录，命名更准确。旧名保留为 deprecated 别名。
+- **变更** `SysPath::AppDir` 重命名为 `SysPath::Executable`：返回可执行文件完整路径（含文件名）。旧名保留为 deprecated 别名。
+- **文档** 同步更新 3、6.3、6.4、7.3.2、8.2、10、11、12、14、15 等章节。

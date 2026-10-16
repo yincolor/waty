@@ -33,9 +33,17 @@ namespace waty
     /// 应用配置（见文档 6.3）
     struct ApplicationOptions
     {
-        std::string_view appName;  // 应用名称 或 项目名称
+        std::string_view appName;  // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_]+$，1-64 字符）
+        std::string_view organizationName = "waty";  // 组织或发布者名称；用于用户数据目录拼接；校验同 appName
         std::string_view icon;     // 图标路径；留空则使用系统默认图标
         std::optional<std::string_view> logFile;  // 日志文件路径
+
+        // WebView 运行时数据目录。
+        // 留空时默认使用 getPath(SysPath::AppData) / "webview"。
+        // Linux: $XDG_DATA_HOME/<organizationName>/<appName>/webview，默认 ~/.local/share/waty/<appName>/webview。
+        // Windows: %LOCALAPPDATA%\<organizationName>\<appName>\WebView2。
+        // macOS: ~/Library/Application Support/<organizationName>/<appName>/WebView。
+        std::optional<std::string_view> webviewStoragePath;
 
         PermissionOptions permissions;
     };
@@ -54,5 +62,10 @@ namespace waty
 
         std::weak_ptr<WebWindow> parentWebWindow;  // 父窗口，使用 weak_ptr 避免生命周期问题
         std::string_view icon;                     // 图标路径；留空则继承 ApplicationOptions.icon
+
+        // 当前窗口的 WebView 运行时数据目录。
+        // 留空时继承 ApplicationOptions.webviewStoragePath；
+        // 若两者都为空，则使用默认平台数据目录。
+        std::optional<std::string_view> storagePath;
     };
 } // namespace waty

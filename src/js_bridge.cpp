@@ -349,14 +349,25 @@ namespace waty::detail
             {
                 const std::string path = req.value("path", "");
                 SysPath sp = SysPath::Home;
-                if (path == "userData") sp = SysPath::UserData;
+                if (path == "appData") sp = SysPath::AppData;
+                else if (path == "config") sp = SysPath::Config;
                 else if (path == "temp") sp = SysPath::Temp;
                 else if (path == "downloads") sp = SysPath::Downloads;
                 else if (path == "documents") sp = SysPath::Documents;
-                else if (path == "appDir") sp = SysPath::AppDir;
+                else if (path == "executable") sp = SysPath::Executable;
                 else if (path == "home") sp = SysPath::Home;
                 else if (path == "cache") sp = SysPath::Cache;
                 else if (path == "logs") sp = SysPath::Logs;
+                else if (path == "userData")
+                {
+                    log_message("warn", "waty: os.getPath(\"userData\") 已废弃，请改用 \"config\"");
+                    sp = SysPath::Config;
+                }
+                else if (path == "appDir")
+                {
+                    log_message("warn", "waty: os.getPath(\"appDir\") 已废弃，请改用 \"executable\"");
+                    sp = SysPath::Executable;
+                }
                 else
                 {
                     respond_error(impl, id, nlohmann::json{{"name", "WatyOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown path"}});

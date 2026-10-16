@@ -275,6 +275,61 @@ namespace waty
         m_impl->parent     = options.parentWebWindow;
         m_impl->icon       = std::string(options.icon);
 
+        // 解析 WebView 运行时数据目录：窗口覆盖 → 应用配置 → 默认平台数据目录。
+        // 注意：Saucer 的 storage_path 在 WebKitGTK 后端是一个 SQLite 文件路径，
+        // 在 WebView2 / Qt 后端则是目录路径，因此这里按平台拼接。
+        const auto apply_explicit_storage = [&](std::string_view raw) {
+            auto path = std::filesystem::path(std::string(raw));
+            std::error_code ec;
+            if (path.has_parent_path())
+            {
+                std::filesystem::create_directories(path.parent_path(), ec);
+            }
+            if (ec)
+            {
+                detail::log_message("warn", "waty: 无法创建 WebView 数据目录的父目录，回退 Saucer 默认: " +
+                                             path.string() + " (" + ec.message() + ")");
+                m_impl->storage_path.reset();
+                return;
+            }
+            m_impl->storage_path = path.string();
+            detail::log_message("info", "waty: WebView storage_path: " + path.string());
+        };
+
+        if (options.storagePath && !options.storagePath->empty())
+        {
+            apply_explicit_storage(*options.storagePath);
+        }
+        else if (app && app->m_impl->webview_storage_path && !app->m_impl->webview_storage_path->empty())
+        {
+            apply_explicit_storage(*app->m_impl->webview_storage_path);
+        }
+        else if (app)
+        {
+            const auto base = app->getPath(SysPath::AppData);
+            auto data_dir   = std::filesystem::path(base) / "webview";
+
+            std::error_code ec;
+            std::filesystem::create_directories(data_dir, ec);
+            if (ec)
+            {
+                detail::log_message("warn", "waty: 无法创建 WebView 数据目录，回退 Saucer 默认: " +
+                                             data_dir.string() + " (" + ec.message() + ")");
+                m_impl->storage_path.reset();
+            }
+            else
+            {
+#if defined(SAUCER_WEBKITGTK)
+                // WebKitGTK 的 storage_path 是 Cookie 持久化 SQLite 文件路径。
+                m_impl->storage_path = (data_dir / "cookies.sqlite").string();
+#else
+                m_impl->storage_path = data_dir.string();
+#endif
+                detail::log_message("info", "waty: WebView 数据目录: " + data_dir.string() +
+                                             "，storage_path: " + *m_impl->storage_path);
+            }
+        }
+
         m_impl->cached_size = {options.width, options.height};
     }
 
@@ -585,7 +640,13 @@ namespace waty
         // TODO(phase2): 父窗口（parent）、初始位置
 
         // 创建 WebView
-        auto view = saucer::webview::create({.window = m_impl->window});
+        saucer::webview::options webview_options{.window = m_impl->window};
+        if (m_impl->storage_path)
+        {
+            webview_options.storage_path = std::filesystem::path(*m_impl->storage_path);
+        }
+
+        auto view = saucer::webview::create(webview_options);
         if (!view)
         {
             throw std::runtime_error("waty: 创建 WebView 失败: " + view.error().message());

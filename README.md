@@ -38,7 +38,7 @@ cmake --build build -j
 int main()
 {
     waty::ApplicationOptions app_opts;
-    app_opts.appName = "Waty Demo";
+    app_opts.appName = "Waty_Demo";
 
     waty::Application app(app_opts);
 

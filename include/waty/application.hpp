@@ -20,14 +20,19 @@ namespace waty
     /// 应用路径（见文档 7.3.2）
     enum class SysPath
     {
-        UserData,
+        AppData,      // XDG_DATA_HOME/<organizationName>/<appName>/
+        Config,       // XDG_CONFIG_HOME/<organizationName>/<appName>/，原 UserData
         Temp,
         Downloads,
         Documents,
-        AppDir,
+        Executable,   // 可执行文件完整路径（含文件名），原 AppDir
         Home,
-        Cache,
+        Cache,        // XDG_CACHE_HOME/<organizationName>/<appName>/
         Logs,
+
+        // deprecated aliases（保留源码兼容）
+        UserData = Config,
+        AppDir = Executable,
     };
 
     /// 应用生命周期管理（见文档 7.3）。

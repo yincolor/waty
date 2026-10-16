@@ -173,6 +173,9 @@ namespace waty
         std::weak_ptr<WebWindow> parent;
         std::string icon;
 
+        // WebView 运行时数据目录（已解析；为空表示回退 Saucer 默认）
+        std::optional<std::string> storage_path;
+
         // 原生对象
         std::shared_ptr<saucer::window> window;
         std::unique_ptr<saucer::webview> view;
@@ -225,8 +228,10 @@ namespace waty
         std::uint64_t next_id = 1;
 
         std::string app_name;
+        std::string organization_name;
         std::string icon;
         std::optional<std::string> log_file;
+        std::optional<std::string> webview_storage_path;
         PermissionOptions permissions;
 
         // 应用生命周期事件
@@ -276,6 +281,7 @@ namespace waty::detail
     void handle_dialog_request(WebWindow::Impl &impl, const nlohmann::json &request);
 
     // web_window.cpp：图标路径解析（先查嵌入资源，再查可执行文件目录）
+    std::string executable_path();
     std::string executable_dir();
     std::optional<saucer::icon> resolve_icon(std::string_view path);
 
