@@ -1,4 +1,4 @@
-#include <whiz/application.hpp>
+#include <waty/application.hpp>
 
 #include "detail.hpp"
 
@@ -29,7 +29,7 @@
     #include <unistd.h>
 #endif
 
-namespace whiz::detail
+namespace waty::detail
 {
     void post_to_ui_thread(saucer::application *app, std::function<void()> callback)
     {
@@ -43,12 +43,12 @@ namespace whiz::detail
     void log_message(std::string_view level, std::string_view message)
     {
         // TODO(doc-gap): 阶段 2 仅控制台输出；ApplicationOptions.logFile 写入后续补齐。
-        std::fprintf(stderr, "[whiz][%s] %.*s\n", std::string(level).c_str(),
+        std::fprintf(stderr, "[waty][%s] %.*s\n", std::string(level).c_str(),
                      static_cast<int>(message.size()), message.data());
     }
-} // namespace whiz::detail
+} // namespace waty::detail
 
-namespace whiz
+namespace waty
 {
     namespace
     {
@@ -130,10 +130,10 @@ namespace whiz
         std::string id = m_impl->app_name;
         if (id.empty())
         {
-            id = "whiz-app";  // TODO(doc-gap): 文档未规定 appName 为空时的行为
+            id = "waty-app";  // TODO(doc-gap): 文档未规定 appName 为空时的行为
         }
 
-        // quit_on_last_window_closed 设为 false：由 whiz 自行处理 window-all-closed 默认行为，
+        // quit_on_last_window_closed 设为 false：由 waty 自行处理 window-all-closed 默认行为，
         // 以保证 before-quit / will-quit / quit 生命周期事件完整触发。
         auto created = saucer::application::create({
             .id                       = id,
@@ -141,7 +141,7 @@ namespace whiz
         });
         if (!created)
         {
-            throw std::runtime_error("whiz: 创建 saucer::application 失败: " + created.error().message());
+            throw std::runtime_error("waty: 创建 saucer::application 失败: " + created.error().message());
         }
         m_impl->app = std::make_unique<saucer::application>(std::move(*created));
 
@@ -151,11 +151,11 @@ namespace whiz
             m_impl->resolved_icon = detail::resolve_icon(m_impl->icon);
             if (!m_impl->resolved_icon)
             {
-                detail::log_message("warn", "whiz: ApplicationOptions.icon 未找到，使用系统默认图标: " + m_impl->icon);
+                detail::log_message("warn", "waty: ApplicationOptions.icon 未找到，使用系统默认图标: " + m_impl->icon);
             }
         }
 
-        // 挂接 saucer 的 quit 事件：映射为 whiz 的 before-quit / will-quit。
+        // 挂接 saucer 的 quit 事件：映射为 waty 的 before-quit / will-quit。
         m_impl->app->on<saucer::application::event::quit>({{.func = [this]() -> saucer::policy {
             if (m_impl->events.emit("before-quit"))
             {
@@ -183,7 +183,7 @@ namespace whiz
         m_impl->resolved_icon = detail::resolve_icon(m_impl->icon);
         if (!m_impl->resolved_icon)
         {
-            detail::log_message("warn", "whiz: setIcon 未找到图标，使用系统默认图标: " + m_impl->icon);
+            detail::log_message("warn", "waty: setIcon 未找到图标，使用系统默认图标: " + m_impl->icon);
         }
 
         std::lock_guard<std::mutex> lock(m_impl->windows_mutex);
@@ -202,7 +202,7 @@ namespace whiz
         // 尺寸校验（文档 6.4）：负值抛 std::invalid_argument
         if (options.width < 0 || options.height < 0 || options.minWidth < 0 || options.minHeight < 0)
         {
-            throw std::invalid_argument("whiz: 窗口宽度/高度/最小宽度/最小高度不能为负值");
+            throw std::invalid_argument("waty: 窗口宽度/高度/最小宽度/最小高度不能为负值");
         }
         // TODO(phase2): 宽度/高度/最小尺寸超过屏幕分辨率 → std::out_of_range
 
@@ -242,7 +242,7 @@ namespace whiz
     {
         if (!k_app_events.contains(std::string(event)))
         {
-            throw std::invalid_argument("whiz: 未知应用事件: " + std::string(event));
+            throw std::invalid_argument("waty: 未知应用事件: " + std::string(event));
         }
         return m_impl->events.on(std::string(event), std::move(callback));
     }
@@ -257,7 +257,7 @@ namespace whiz
             if (m_impl->tick_iterating)
             {
                 // 文档 7.3.3：回调中禁止注册/取消任务
-                assert(false && "whiz: onEventLoopTick 回调中禁止注册任务");
+                assert(false && "waty: onEventLoopTick 回调中禁止注册任务");
                 std::abort();
             }
             m_impl->tick_tasks.push_back(task);
@@ -285,7 +285,7 @@ namespace whiz
     {
         if (m_impl->tick_iterating)
         {
-            assert(false && "whiz: onEventLoopTick 重入");
+            assert(false && "waty: onEventLoopTick 重入");
             std::abort();
         }
         m_impl->tick_iterating = true;
@@ -619,4 +619,4 @@ namespace whiz
         ::close(cfd);
     }
 #endif
-} // namespace whiz
+} // namespace waty

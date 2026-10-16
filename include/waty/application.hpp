@@ -1,9 +1,9 @@
 #pragma once
 
-#include <whiz/event.hpp>
-#include <whiz/options.hpp>
-#include <whiz/subscription.hpp>
-#include <whiz/web_window.hpp>
+#include <waty/event.hpp>
+#include <waty/options.hpp>
+#include <waty/subscription.hpp>
+#include <waty/web_window.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace whiz
+namespace waty
 {
     /// 应用路径（见文档 7.3.2）
     enum class SysPath
@@ -102,4 +102,4 @@ namespace whiz
 
         friend class WebWindow;
     };
-} // namespace whiz
+} // namespace waty
