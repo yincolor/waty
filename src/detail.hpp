@@ -1,10 +1,10 @@
 #pragma once
 
-// whiz 内部共享头文件（仅 src/ 内部使用，不对外暴露）。
+// waty 内部共享头文件（仅 src/ 内部使用，不对外暴露）。
 
-#include <whiz/application.hpp>
-#include <whiz/detail/embedded.hpp>
-#include <whiz/web_window.hpp>
+#include <waty/application.hpp>
+#include <waty/detail/embedded.hpp>
+#include <waty/web_window.hpp>
 
 #include <saucer/app.hpp>
 #include <saucer/icon.hpp>
@@ -29,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-namespace whiz::detail
+namespace waty::detail
 {
     /// 事件发射器：回调签名 void(Event&, const nlohmann::json&)。
     /// 回调在 UI 线程执行；unsubscribe 线程安全；emit 返回是否有回调调用了 preventDefault。
@@ -149,9 +149,9 @@ namespace whiz::detail
 
     /// 应用日志（控制台输出）。TODO(doc-gap): 阶段 2 仅控制台，logFile 写入后续补齐。
     void log_message(std::string_view level, std::string_view message);
-} // namespace whiz::detail
+} // namespace waty::detail
 
-namespace whiz
+namespace waty
 {
     /// WebWindow 内部实现（在 src/detail.hpp 中统一定义，供多个源文件共享）。
     struct WebWindow::Impl
@@ -256,9 +256,9 @@ namespace whiz
         // 已打开窗口计数（用于 window-all-closed）
         std::atomic<std::size_t> open_windows{0};
     };
-} // namespace whiz
+} // namespace waty
 
-namespace whiz::detail
+namespace waty::detail
 {
     // 以下函数在其它源文件中实现：
 

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
-    <title>whiz 示例</title>
+    <title>waty 示例</title>
     <style>
         body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
         h1 { color: #1a73e8; }
@@ -12,11 +12,11 @@
     </style>
 </head>
 <body>
-    <h1>🚀 whiz 阶段 2 示例</h1>
-    <p>此页面由 whiz_embed_resources 嵌入到可执行文件。</p>
+    <h1>🚀 waty 阶段 2 示例</h1>
+    <p>此页面由 waty_embed_resources 嵌入到可执行文件。</p>
 
     <div>
-        <button id="ipc">ipc.invoke("greet", "whiz")</button>
+        <button id="ipc">ipc.invoke("greet", "waty")</button>
         <button id="os">os.platform / os.homedir / getPath</button>
         <button id="fs">fs.stat(index.html)</button>
         <button id="win">window.getSize</button>
@@ -30,24 +30,24 @@
         const out = (s) => { document.getElementById("out").textContent += s + "\n"; };
 
         document.getElementById("ipc").onclick = async () => {
-            const r = await window.whiz.ipc.invoke("greet", "whiz");
+            const r = await window.waty.ipc.invoke("greet", "waty");
             out("ipc: " + JSON.stringify(r));
         };
 
         document.getElementById("os").onclick = async () => {
-            const platform = await window.whiz.os.platform();
-            const homedir = await window.whiz.os.homedir();
-            const userData = await window.whiz.os.getPath("userData");
+            const platform = await window.waty.os.platform();
+            const homedir = await window.waty.os.homedir();
+            const userData = await window.waty.os.getPath("userData");
             out(`platform=${platform} homedir=${homedir} userData=${userData}`);
         };
 
         document.getElementById("fs").onclick = async () => {
-            const stats = await window.whiz.fs.stat("index.html");
+            const stats = await window.waty.fs.stat("index.html");
             out("fs.stat: " + JSON.stringify(stats));
         };
 
         document.getElementById("win").onclick = async () => {
-            const size = await window.whiz.window.getSize();
+            const size = await window.waty.window.getSize();
             out("window.getSize: " + JSON.stringify(size));
         };
 
@@ -55,13 +55,13 @@
             out("等待 C++ emit...");
         };
 
-        if (window.whiz.ipc) {
-            window.whiz.ipc.on("server-ping", (data) => {
+        if (window.waty.ipc) {
+            window.waty.ipc.on("server-ping", (data) => {
                 out("收到 C++ 推送: " + JSON.stringify(data));
             });
 
             // 页面加载后自动调用一次 IPC，验证 JS → C++ 桥
-            window.whiz.ipc.invoke("greet", "auto-test").then((r) => {
+            window.waty.ipc.invoke("greet", "auto-test").then((r) => {
                 console.log("IPC 结果: " + JSON.stringify(r));
                 out("自动 IPC 结果: " + JSON.stringify(r));
             }).catch((e) => {
@@ -69,8 +69,8 @@
                 out("自动 IPC 错误: " + JSON.stringify(e));
             });
 
-            if (window.whiz.fs) {
-                window.whiz.fs.stat("/tmp").then((s) => {
+            if (window.waty.fs) {
+                window.waty.fs.stat("/tmp").then((s) => {
                     console.log("fs.stat /tmp: " + JSON.stringify(s));
                 }).catch((e) => {
                     console.error("fs.stat 错误: " + JSON.stringify(e));

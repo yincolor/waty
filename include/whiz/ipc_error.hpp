@@ -3,7 +3,7 @@
 #include <optional>
 #include <string>
 
-namespace whiz
+namespace waty
 {
     /// IPC 错误（见文档 8.1.2）。
     /// 当 C++ 侧 ipcHandle 回调抛出异常时，JS 侧 Promise 会以该结构对应的错误信息 reject。
@@ -16,4 +16,4 @@ namespace whiz
         // 具体结构在阶段 2 实现 IPC 桥时补全。
         std::optional<std::string> stack;
     };
-} // namespace whiz
+} // namespace waty

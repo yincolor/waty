@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace whiz
+namespace waty
 {
     /// 文件类型过滤器（见文档 6.5）
     struct FileFilter
@@ -66,4 +66,4 @@ namespace whiz
         int response;              // 用户点击的按钮索引（0 起始）；标题栏关闭时为 -1
         bool checkboxChecked;      // 复选框最终状态；未启用复选框时为 false
     };
-} // namespace whiz
+} // namespace waty

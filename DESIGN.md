@@ -1,4 +1,4 @@
-# Whiz 项目文档 v3.4.2
+# Waty 项目文档 v3.4.2
 
 > 基于 Saucer + C++23 + CMake 的轻量级桌面应用框架，提供类似 Electron 的开发体验。
 
@@ -26,9 +26,9 @@
 
 ## 1. 项目简介
 
-**Whiz** 是一个构建在 [Saucer](https://github.com/saucer/saucer) 之上的 C++ 桌面应用框架。它将 Saucer 的底层能力（窗口、WebView、C++/JS 互操作）包装成贴近应用开发直觉的 API，让 C++ 开发者能用熟悉的语法快速构建 Web 技术驱动的桌面应用，同时保留 C++ 的性能与体积优势。
+**Waty** 是一个构建在 [Saucer](https://github.com/saucer/saucer) 之上的 C++ 桌面应用框架。它将 Saucer 的底层能力（窗口、WebView、C++/JS 互操作）包装成贴近应用开发直觉的 API，让 C++ 开发者能用熟悉的语法快速构建 Web 技术驱动的桌面应用，同时保留 C++ 的性能与体积优势。
 
-**Whiz 做什么：**
+**Waty 做什么：**
 
 - 提供类似 Electron 的窗口、WebView、IPC 抽象
 - 把前端构建产物嵌入二进制，实现单文件分发
@@ -79,33 +79,33 @@
 ```cmake
 include(FetchContent)
 
-FetchContent_Declare(whiz
-    GIT_REPOSITORY https://github.com/yourname/whiz.git
+FetchContent_Declare(waty
+    GIT_REPOSITORY https://github.com/yourname/waty.git
     GIT_TAG v3.4.2)          # 固定版本 tag，避免 main 分支不稳定
-FetchContent_MakeAvailable(whiz)
+FetchContent_MakeAvailable(waty)
 
 add_executable(my_app main.cpp)
 
-# 将前端构建产物生成独立资源目标（默认 whiz::embedded）
-whiz_embed("${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist")
+# 将前端构建产物生成独立资源目标（默认 waty::embedded）
+waty_embed("${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist")
 
-target_link_libraries(my_app PRIVATE whiz::whiz whiz::embedded)
+target_link_libraries(my_app PRIVATE waty::waty waty::embedded)
 ```
 
-`whiz_embed` 是 Whiz 提供的 CMake 函数，用于把指定目录整个嵌入到独立资源目标中。入口 HTML 由 C++ 侧在运行时决定。
+`waty_embed` 是 Waty 提供的 CMake 函数，用于把指定目录整个嵌入到独立资源目标中。入口 HTML 由 C++ 侧在运行时决定。
 
 ### 4.2 最小 main.cpp
 
 ```cpp
-#include <whiz/application.hpp>
+#include <waty/application.hpp>
 
 int main() {
-    whiz::ApplicationOptions appOpts;
+    waty::ApplicationOptions appOpts;
     appOpts.appName = "My App";
 
-    whiz::Application app(appOpts);
+    waty::Application app(appOpts);
 
-    whiz::WebWindowOptions winOpts;
+    waty::WebWindowOptions winOpts;
     winOpts.title = "Main";
     winOpts.width = 800;
     winOpts.height = 600;
@@ -121,10 +121,10 @@ int main() {
 ### 4.3 完整示例：含权限与窗口选项
 
 ```cpp
-#include <whiz/application.hpp>
+#include <waty/application.hpp>
 
 int main() {
-    whiz::ApplicationOptions appOpts;
+    waty::ApplicationOptions appOpts;
     appOpts.appName = "My App";
     appOpts.icon = "assets/icon.png";          // 可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径
     appOpts.permissions.os = true;             // 启用 JS 系统信息 + getPath
@@ -133,9 +133,9 @@ int main() {
     appOpts.permissions.fs.write = false;      // 默认关闭写
     appOpts.logFile = "/home/user/data/app.log"; // 建议绝对路径，可用 getPath 拼接
 
-    whiz::Application app(appOpts);
+    waty::Application app(appOpts);
 
-    whiz::WebWindowOptions winOpts;
+    waty::WebWindowOptions winOpts;
     winOpts.title = "Main";
     winOpts.width = 1024;
     winOpts.height = 768;
@@ -153,11 +153,11 @@ int main() {
 
 #### 4.3.1 对话框调用示例
 
-> 以下示例假定已 `#include <whiz/dialog.hpp>`（或 `<whiz/application.hpp>` 已包含该头文件；具体以实际头文件依赖为准）。
+> 以下示例假定已 `#include <waty/dialog.hpp>`（或 `<waty/application.hpp>` 已包含该头文件；具体以实际头文件依赖为准）。
 
 ```cpp
 // 打开文件选择对话框（必须在 UI 线程调用）
-whiz::OpenDialogOptions openOpts;
+waty::OpenDialogOptions openOpts;
 openOpts.title = "选择图片";
 openOpts.defaultPath = "/home/user/pictures";
 openOpts.filters = {{"Images", {"png", "jpg", "jpeg"}}};
@@ -171,15 +171,15 @@ ww->showOpenDialog(openOpts, [](std::optional<std::vector<std::string>> paths) {
 });
 
 // 显示消息框（必须在 UI 线程调用）
-whiz::MessageBoxOptions msgOpts;
-msgOpts.type = whiz::MessageBoxType::Question;
+waty::MessageBoxOptions msgOpts;
+msgOpts.type = waty::MessageBoxType::Question;
 msgOpts.title = "确认";
 msgOpts.message = "确定要删除吗？";
 msgOpts.buttons = {"取消", "删除"};
 msgOpts.defaultButtonIndex = 1;
 msgOpts.cancelButtonIndex = 0;
 
-ww->showMessageBox(msgOpts, [](whiz::MessageBoxResult result) {
+ww->showMessageBox(msgOpts, [](waty::MessageBoxResult result) {
     if (result.response == 1) {
         // 用户点击了“删除”
     } else if (result.response == 0) {
@@ -194,9 +194,9 @@ ww->showMessageBox(msgOpts, [](whiz::MessageBoxResult result) {
 
 ```cpp
 int main() {
-    whiz::ApplicationOptions appOpts;
+    waty::ApplicationOptions appOpts;
     appOpts.appName = "My App";
-    whiz::Application app(appOpts);
+    waty::Application app(appOpts);
 
     if (!app.requestSingleInstanceLock()) {
         app.quit();          // 未获得锁，立即退出
@@ -212,11 +212,11 @@ int main() {
 ### 4.5 使用者侧三步
 
 1. 构建前端，产物落到 `frontend/dist/`
-2. CMake 通过 `FetchContent` 引入 Whiz，并调用 `whiz_embed` 嵌入资源
+2. CMake 通过 `FetchContent` 引入 Waty，并调用 `waty_embed` 嵌入资源
 3. C++ 里配置 `ApplicationOptions`、创建 `WebWindowOptions`，调用：
    `app.createWindow(...) → loadFile("...") → show() → app.run()`
 
-入口 HTML 的位置、多页面结构、资源路径，全部由使用者的 C++ 代码和前端工程决定。Whiz 只负责把它们嵌进去并跑起来。
+入口 HTML 的位置、多页面结构、资源路径，全部由使用者的 C++ 代码和前端工程决定。Waty 只负责把它们嵌进去并跑起来。
 
 ### 4.6 核心对象
 
@@ -228,15 +228,15 @@ int main() {
 
 ## 5. 资源嵌入机制
 
-Whiz 提供 CMake 函数 `whiz_embed`：
+Waty 提供 CMake 函数 `waty_embed`：
 
 ```cmake
-whiz_embed(<directory> [NAME <name>])
+waty_embed(<directory> [NAME <name>])
 ```
 
 1. 构建时扫描 `<directory>` 下的所有文件
-2. 生成 C++ 源文件，并创建一个独立资源目标（默认 `whiz::embedded`，可用 `NAME` 自定义，如 `whiz::ui`）
-3. 使用者通过 `target_link_libraries(my_app PRIVATE whiz::embedded)` 链接
+2. 生成 C++ 源文件，并创建一个独立资源目标（默认 `waty::embedded`，可用 `NAME` 自定义，如 `waty::ui`）
+3. 使用者通过 `target_link_libraries(my_app PRIVATE waty::embedded)` 链接
 4. 注册 `embedded://root/` scheme 供 WebView 访问
 
 一个资源目标可被多个可执行目标链接，资源只编译一次。
@@ -250,7 +250,7 @@ whiz_embed(<directory> [NAME <name>])
 
 **图标路径解析优先级：**
 
-当设置 `ApplicationOptions.icon` 或 `WebWindowOptions.icon` 时，Whiz 按以下顺序查找：
+当设置 `ApplicationOptions.icon` 或 `WebWindowOptions.icon` 时，Waty 按以下顺序查找：
 
 1. 嵌入资源中的相对路径
 2. 相对于可执行文件目录的文件系统路径
@@ -270,7 +270,7 @@ struct FsPermissionOptions {
 };
 ```
 
-> Whiz 不对文件路径做白名单限制。路径访问安全由操作系统或容器工具负责。启用前请评估安全风险。
+> Waty 不对文件路径做白名单限制。路径访问安全由操作系统或容器工具负责。启用前请评估安全风险。
 
 ### 6.2 PermissionOptions
 
@@ -395,7 +395,7 @@ struct MessageBoxResult {
 
 ### 7.1 线程模型
 
-Whiz 的线程模型与 Saucer 一致，核心规则只有三条：
+Waty 的线程模型与 Saucer 一致，核心规则只有三条：
 
 - **写操作在 UI 线程**：创建窗口、`loadFile` / `loadURL`、`setSize` / `show` / `hide` / `close` 等所有写方法，必须在 UI 线程调用。
 - **耗时操作在线程池**：`ipcHandle` 回调在线程池执行，可以执行阻塞操作，不会卡住 UI。
@@ -415,7 +415,7 @@ Whiz 的线程模型与 Saucer 一致，核心规则只有三条：
 | macOS | `NSApplication` run loop |
 | Linux | GTK 主循环 |
 
-所有原生窗口操作（创建、显示、调整大小、事件分发）都必须在 UI 线程执行，这是操作系统的硬性要求。Whiz 不做线程切换，谁调用 `app.run()`，谁就是 UI 线程。
+所有原生窗口操作（创建、显示、调整大小、事件分发）都必须在 UI 线程执行，这是操作系统的硬性要求。Waty 不做线程切换，谁调用 `app.run()`，谁就是 UI 线程。
 
 #### 7.1.2 线程视图
 
@@ -474,8 +474,8 @@ Whiz 的线程模型与 Saucer 一致，核心规则只有三条：
 
 - **IPC 请求回调（`ipcHandle`）默认在线程池执行**。你可以在回调中执行耗时操作，不会阻塞 UI。
 - IPC 回调**不能直接操作 UI / Saucer 对象**。如需更新窗口，请使用 `emit` 或通过 UI 线程调度。
-- 若 IPC 回调返回 `std::future<nlohmann::json>`，Whiz 会在 future 完成后，**回到 UI 线程** resolve / reject 对应的 JS Promise。
-- **JS 侧超时或取消（`createInvoker`）后，Promise 已 reject；C++ future 仍会执行到完成，但结果会被丢弃，不再尝试 resolve/reject。** Whiz 当前不提供 C++ 侧的取消令牌；如需真正取消 C++ 任务，请由使用者自行实现。
+- 若 IPC 回调返回 `std::future<nlohmann::json>`，Waty 会在 future 完成后，**回到 UI 线程** resolve / reject 对应的 JS Promise。
+- **JS 侧超时或取消（`createInvoker`）后，Promise 已 reject；C++ future 仍会执行到完成，但结果会被丢弃，不再尝试 resolve/reject。** Waty 当前不提供 C++ 侧的取消令牌；如需真正取消 C++ 任务，请由使用者自行实现。
 - **`emit` 是线程安全的**。任意线程可调用，内部会投递到目标窗口的 UI 线程执行。当目标窗口已关闭时，`emit` 静默丢弃消息并记录警告，不抛异常。
 - **`emit` 仅推送给调用它的 `WebWindow` 实例对应的 JS 环境，不会广播到其他窗口。** 如需广播，需遍历 `app.windows()` 逐个调用 `emit`。
 - **窗口事件监听回调（`windowEventHandle`）在 UI 线程执行**。
@@ -523,8 +523,8 @@ main()                                 [UI 线程]
 3. **只读方法可以放心在任意线程调用。** 写方法要回到 UI 线程。
 4. **`emit` 是最常用的跨线程通信方式**，任意线程调用，内部投递到 UI 线程。
 5. **`Subscription` 可以在任意线程 `unsubscribe`**，但正在执行的回调不会被中断，只是之后不再触发。
-6. **对话框方法必须在 UI 线程调用**。由于原生对话框阻塞 UI 线程消息循环，建议从 JS 侧异步触发（`await window.whiz.dialog.showOpenDialog(...)`），不要在 C++ 侧同步等待。
-7. **`onEventLoopTick` 回调中不要做耗时操作**。它是通用扩展点，用于将外部事件源接入 Whiz 的事件循环；如果外部事件源本身能以 fd 形式接入平台主循环（例如 Linux 上的 D-Bus fd、Windows 上的隐藏窗口消息、macOS 上的 `NSStatusItem`），应优先走平台事件源机制，而不是周期性 tick。
+6. **对话框方法必须在 UI 线程调用**。由于原生对话框阻塞 UI 线程消息循环，建议从 JS 侧异步触发（`await window.waty.dialog.showOpenDialog(...)`），不要在 C++ 侧同步等待。
+7. **`onEventLoopTick` 回调中不要做耗时操作**。它是通用扩展点，用于将外部事件源接入 Waty 的事件循环；如果外部事件源本身能以 fd 形式接入平台主循环（例如 Linux 上的 D-Bus fd、Windows 上的隐藏窗口消息、macOS 上的 `NSStatusItem`），应优先走平台事件源机制，而不是周期性 tick。
 
 ### 7.2 通用类型
 
@@ -598,7 +598,7 @@ public:
     // 每轮事件循环触发一次，回调在 UI 线程执行。
     // 返回的 Subscription 可用于取消挂载；需取消时调用 unsubscribe()。
     // 用途：作为通用扩展点，将非 fd 驱动、无法直接接入平台主循环的事件源，
-    //       周期性地接入 Whiz 的事件循环。
+    //       周期性地接入 Waty 的事件循环。
     // 注意：回调中不应执行耗时操作，否则会阻塞 UI 与 WebView。
     Subscription onEventLoopTick(std::function<void()> callback);
 
@@ -650,7 +650,7 @@ public:
 
 ```cpp
 // 所有平台都保持活跃，由业务决定何时退出
-app.on("window-all-closed", [&](whiz::Event& e, const nlohmann::json&) {
+app.on("window-all-closed", [&](waty::Event& e, const nlohmann::json&) {
     e.preventDefault();
 });
 ```
@@ -688,16 +688,16 @@ enum class SysPath {
 std::string Application::getPath(SysPath path) const;
 ```
 
-JS 侧对应 `window.whiz.os.getPath(...)`，受 `permissions.os` 控制，且为异步 API。
+JS 侧对应 `window.waty.os.getPath(...)`，受 `permissions.os` 控制，且为异步 API。
 
-`Application::getPath` 在 C++ 侧不受 `permissions.os` 影响；该权限仅控制 JS 侧 `window.whiz.os` 是否可用。
+`Application::getPath` 在 C++ 侧不受 `permissions.os` 影响；该权限仅控制 JS 侧 `window.waty.os` 是否可用。
 
 ### 7.3.3 事件循环任务（`onEventLoopTick`）
 
-`onEventLoopTick` 是 Whiz 提供的**通用事件循环扩展点**。它允许使用者在每一轮事件循环中执行一段轻量代码，用于桥接外部事件源或执行周期性检查。
+`onEventLoopTick` 是 Waty 提供的**通用事件循环扩展点**。它允许使用者在每一轮事件循环中执行一段轻量代码，用于桥接外部事件源或执行周期性检查。
 
 ```cpp
-whiz::Application app(appOpts);
+waty::Application app(appOpts);
 
 auto sub = app.onEventLoopTick([] {
     // 每轮事件循环执行一次
@@ -710,21 +710,21 @@ auto sub = app.onEventLoopTick([] {
 - **调用时机**：每轮事件循环执行一次，回调在 UI 线程。
 - **注册时机**：可在 `app.run()` 之前或之后调用。在 `app.run()` 之前注册的任务，会在事件循环开始后立即参与调度。
 - **取消方式**：通过返回的 `Subscription` 的 `unsubscribe()` 取消（析构不会自动取消）。可跨线程调用。行为与 `windowEventHandle` / `ipcHandle` 返回的 `Subscription` 一致。
-- **执行顺序**：多个任务按注册顺序依次执行。若某个任务抛出异常，Whiz 会捕获并记录日志，不会中断其他任务。
-- **重入禁止（硬约束）**：任务回调中**禁止**再次注册或取消 `onEventLoopTick` 任务。Whiz 会在遍历期间检测这一行为并触发断言失败，程序将直接退出。如需动态增删，请通过 `std::async` 或 `emit` 调度到下一轮。
-  > 违反此约束导致的迭代器失效、任务丢失或其他异常行为，Whiz 不保证可恢复。请务必遵守。
+- **执行顺序**：多个任务按注册顺序依次执行。若某个任务抛出异常，Waty 会捕获并记录日志，不会中断其他任务。
+- **重入禁止（硬约束）**：任务回调中**禁止**再次注册或取消 `onEventLoopTick` 任务。Waty 会在遍历期间检测这一行为并触发断言失败，程序将直接退出。如需动态增删，请通过 `std::async` 或 `emit` 调度到下一轮。
+  > 违反此约束导致的迭代器失效、任务丢失或其他异常行为，Waty 不保证可恢复。请务必遵守。
 - **耗时限制**：**任务回调中不应执行耗时操作。** 该回调在 UI 线程执行，任何阻塞都会直接冻结窗口和 WebView 的响应。需要耗时逻辑时，应投递到线程池（如 `std::async`），完成后通过 `emit` 回到 UI 线程。
 
 **实现说明：**
 
-Saucer v8.x 未提供 `loop::hook` 之类的直接接口，Whiz 内部通过 Saucer 的异步任务调度能力（`context->async()` 或 `loop->post()`）实现：在每次回调末尾重新投递下一轮任务，从而形成持续的事件循环任务链。用户无需关心这一实现细节。
+Saucer v8.x 未提供 `loop::hook` 之类的直接接口，Waty 内部通过 Saucer 的异步任务调度能力（`context->async()` 或 `loop->post()`）实现：在每次回调末尾重新投递下一轮任务，从而形成持续的事件循环任务链。用户无需关心这一实现细节。
 
 任务存储与生命周期管理遵循以下规则：
 
 - **有序存储**：任务使用 `std::vector` 存储，保持注册顺序，遍历时按注册顺序执行。
 - **标记法取消**：每个任务项带有一个存活标志（`bool alive`）。`unsubscribe()` 不立即从 `std::vector` 中移除任务，而是将该标志置为 `false`；遍历时跳过 `alive == false` 的任务；真正从 `std::vector` 中移除（`erase`）统一放在遍历结束之后执行。
 - **跨线程 `unsubscribe`**：`unsubscribe()` 可从任意线程调用，其行为与 `windowEventHandle` / `ipcHandle` 的 `Subscription` 保持一致——若回调正在执行，不会中断当前回调；当前回调执行完成后不再触发后续回调。跨线程调用会被调度到 UI 线程处理。
-- **重入检测**：Whiz 内部维护一个 `iterating_` 标志，在遍历任务列表期间置位。若在此期间检测到注册或取消操作（无论来自哪个线程），Whiz 会记录日志并触发断言失败，程序直接退出。
+- **重入检测**：Waty 内部维护一个 `iterating_` 标志，在遍历任务列表期间置位。若在此期间检测到注册或取消操作（无论来自哪个线程），Waty 会记录日志并触发断言失败，程序直接退出。
 
 **适用与不适用场景：**
 
@@ -735,7 +735,7 @@ Saucer v8.x 未提供 `loop::hook` 之类的直接接口，Whiz 内部通过 Sau
 | 耗时任务 | 投递到线程池，通过 `emit` 回 UI 线程 |
 | 需要精确高频（< 16ms）调度 | 不推荐，应改用平台原生定时器或事件源 |
 
-> **对 whiz-tray 等扩展库的说明**：系统托盘等外部事件源通常优先采用 fd 注册（Linux）、隐藏窗口消息（Windows）、`NSStatusItem`（macOS）等平台原生事件源机制接入主循环，`onEventLoopTick` **不是这类集成的必需品**，仅作为通用扩展点存在。它是给那些无法以 fd 形式接入平台主循环的事件源准备的兜底方案。
+> **对 waty-tray 等扩展库的说明**：系统托盘等外部事件源通常优先采用 fd 注册（Linux）、隐藏窗口消息（Windows）、`NSStatusItem`（macOS）等平台原生事件源机制接入主循环，`onEventLoopTick` **不是这类集成的必需品**，仅作为通用扩展点存在。它是给那些无法以 fd 形式接入平台主循环的事件源准备的兜底方案。
 
 #### 7.3.4 读取嵌入资源
 
@@ -748,7 +748,7 @@ std::optional<std::vector<std::uint8_t>> Application::readEmbeddedFile(std::stri
 - `path` 为相对嵌入根目录的路径（与 `loadFile` 的 `entry` 同一命名空间），如 `"assets/icon.png"`。
 - 未找到对应资源时返回 `std::nullopt`。
 - 命中时返回 `std::vector<std::uint8_t>`，是嵌入字节的副本，可安全地自行持有与修改。
-- 该接口在 C++ 侧可用，不受 `permissions.fs` 等 JS 权限控制（权限仅约束 JS 侧 `window.whiz.fs`）。
+- 该接口在 C++ 侧可用，不受 `permissions.fs` 等 JS 权限控制（权限仅约束 JS 侧 `window.waty.fs`）。
 
 ### 7.4 WebWindow
 
@@ -765,7 +765,7 @@ public:
     // entry 为空时抛出 std::invalid_argument。
     void loadFile(std::string_view entry);
 
-    // 加载远程 URL。loadURL 完全继承 Saucer 默认策略，Whiz 不做额外修改。如需限制协议或域名，请由使用者在 WebView 层自行处理。
+    // 加载远程 URL。loadURL 完全继承 Saucer 默认策略，Waty 不做额外修改。如需限制协议或域名，请由使用者在 WebView 层自行处理。
     void loadURL(std::string_view url);
 
     // 全屏
@@ -872,7 +872,7 @@ public:
 - 若子窗口创建时，发现传入的 `parentWebWindow` 弱指针已失效，子窗口按无父窗口处理，不跟随任何窗口关闭。
 
 ```cpp
-parent->windowEventHandle("sub-window-close", [](whiz::Event&, const nlohmann::json& args) {
+parent->windowEventHandle("sub-window-close", [](waty::Event&, const nlohmann::json& args) {
     auto childId = args["windowId"];
     // 处理子窗口关闭
 });
@@ -880,11 +880,11 @@ parent->windowEventHandle("sub-window-close", [](whiz::Event&, const nlohmann::j
 
 ---
 
-## 8. JavaScript API (`window.whiz`)
+## 8. JavaScript API (`window.waty`)
 
-所有功能挂在全局对象 `window.whiz` 下，且仅在 C++ 侧配置了对应权限时才可用。未配置权限的模块在 JS 环境中为 `undefined`。
+所有功能挂在全局对象 `window.waty` 下，且仅在 C++ 侧配置了对应权限时才可用。未配置权限的模块在 JS 环境中为 `undefined`。
 
-若 `permissions.ipc = false`，则 `window.whiz.ipc` 未定义，访问结果为 `undefined`。
+若 `permissions.ipc = false`，则 `window.waty.ipc` 未定义，访问结果为 `undefined`。
 
 ### 8.1 IPC
 
@@ -893,13 +893,13 @@ C++ 侧回调的标准写法见第 9 章。所有 ipcHandle 回调都应返回 `
 ```js
 // 向 C++ 发送请求。底层始终构造数组：[eventName, ...args]，至少包含事件名。
 // C++ 侧 ipcHandle 回调收到的 args 是除事件名外的参数数组。
-const result = await window.whiz.ipc.invoke("event-name", arg1, arg2);
+const result = await window.waty.ipc.invoke("event-name", arg1, arg2);
 
 // 无参数调用
-const result2 = await window.whiz.ipc.invoke("event-name"); // C++ 收到 []
+const result2 = await window.waty.ipc.invoke("event-name"); // C++ 收到 []
 
 // 接收 C++ 主动推送的消息
-const off = window.whiz.ipc.on("event-name", (data) => {
+const off = window.waty.ipc.on("event-name", (data) => {
     console.log(data);
 });
 
@@ -919,7 +919,7 @@ const off = window.whiz.ipc.on("event-name", (data) => {
 ```js
 const controller = new AbortController();
 
-const invoke = window.whiz.ipc.createInvoker({
+const invoke = window.waty.ipc.createInvoker({
     timeout: 5000,              // 可选，单位毫秒；不传则默认不超时
     signal: controller.signal   // 可选，不传则不可取消
 });
@@ -942,8 +942,8 @@ controller.abort();
 - 返回的 `invoke` 与普通 `invoke` 调用方式一致：`invoke(event, ...args)`。
 - `signal` 是共享的：一旦 `abort()`，该 invoker 的所有未完成调用都会 reject `IPC_CANCELLED`，之后的新调用也会立即 reject。
 - 如果每次调用需要独立取消，创建多个 invoker，每个绑定自己的 `AbortController`。
-- **超时或取消后，JS Promise 会 reject；C++ 侧 future 仍会执行到完成，但结果会被丢弃。** Whiz 不会在 future 完成后再尝试 resolve/reject 已 reject 的 Promise，也不会抛出未处理异常。
-- Whiz 当前不提供 C++ 侧取消令牌；如需真正取消 C++ 任务，需由使用者在回调内自行实现取消逻辑。
+- **超时或取消后，JS Promise 会 reject；C++ 侧 future 仍会执行到完成，但结果会被丢弃。** Waty 不会在 future 完成后再尝试 resolve/reject 已 reject 的 Promise，也不会抛出未处理异常。
+- Waty 当前不提供 C++ 侧取消令牌；如需真正取消 C++ 任务，需由使用者在回调内自行实现取消逻辑。
 
 #### 8.1.2 错误传递
 
@@ -951,7 +951,7 @@ controller.abort();
 
 ```ts
 {
-  name: "WhizIpcError",
+  name: "WatyIpcError",
   code: string,
   message: string,
   stack?: string,
@@ -971,48 +971,48 @@ IPC_CANCELLED
 IPC_INTERNAL
 ```
 
-C++ 侧提供 `whiz::IpcError`，普通异常映射：
+C++ 侧提供 `waty::IpcError`，普通异常映射：
 
 - `std::invalid_argument` → `IPC_INVALID_ARGUMENT`
 - 其他未捕获异常 → `IPC_HANDLER_EXCEPTION`
-- details 由 whiz::IpcError 自定义填充，普通异常时为空
+- details 由 waty::IpcError 自定义填充，普通异常时为空
 
 ### 8.2 OS（需 `permissions.os = true`）
 
 所有 `os` 方法均为**异步**，返回 Promise。
 
 ```js
-await window.whiz.os.platform(); // 'win32' | 'darwin' | 'linux'
-await window.whiz.os.arch();     // 'x64' | 'arm64' | ...
-await window.whiz.os.homedir();  // '/home/username/'
+await window.waty.os.platform(); // 'win32' | 'darwin' | 'linux'
+await window.waty.os.arch();     // 'x64' | 'arm64' | ...
+await window.waty.os.homedir();  // '/home/username/'
 
 // 应用路径
-await window.whiz.os.getPath("userData" | "temp" | "downloads" | "documents" | "appDir" | "home" | "cache" | "logs");
+await window.waty.os.getPath("userData" | "temp" | "downloads" | "documents" | "appDir" | "home" | "cache" | "logs");
 ```
 
 ### 8.3 FS（需 `permissions.fs.read` / `permissions.fs.write`）
 
-参考 Node.js 风格，通过**独立桥接**实现，不走 IPC。默认关闭，启用前请评估安全风险。Whiz 不对路径做白名单限制，路径访问安全由操作系统或容器工具负责。
+参考 Node.js 风格，通过**独立桥接**实现，不走 IPC。默认关闭，启用前请评估安全风险。Waty 不对路径做白名单限制，路径访问安全由操作系统或容器工具负责。
 
 ```js
 // 全量读取，返回 Promise<Uint8Array>
-const data = await window.whiz.fs.readFile("/path/to/file");
+const data = await window.waty.fs.readFile("/path/to/file");
 
 // 全量写入
-await window.whiz.fs.writeFile("/path/to/file", new Uint8Array([1, 2, 3]));
+await window.waty.fs.writeFile("/path/to/file", new Uint8Array([1, 2, 3]));
 
 // 流式读取，返回 Promise<ReadableStream>（Web Streams 封装）
-const readStream = await window.whiz.fs.createReadStream("/path/to/file", { highWaterMark: 1024 });
+const readStream = await window.waty.fs.createReadStream("/path/to/file", { highWaterMark: 1024 });
 
 // 流式写入，返回 Promise<WritableStream>（Web Streams 封装）
-const writeStream = await window.whiz.fs.createWriteStream("/path/to/file");
+const writeStream = await window.waty.fs.createWriteStream("/path/to/file");
 
 // 文件信息，返回 Promise<Stats>
 // 当路径不存在时，返回的Stats对象中设置 exists 为 false，而 size 为 0、mtimeMs / mtimeISO 为空/0、type 为 'other'，只有 exists 可靠。
-const stats = await window.whiz.fs.stat("/path/to/file");
+const stats = await window.waty.fs.stat("/path/to/file");
 
-// 判断路径（文件或目录等）是否存在，返回 Promise<boolean>。这是 Whiz 自有 API。
-const exists = await window.whiz.fs.exists("/path/to/file");
+// 判断路径（文件或目录等）是否存在，返回 Promise<boolean>。这是 Waty 自有 API。
+const exists = await window.waty.fs.exists("/path/to/file");
 ```
 
 **权限：**
@@ -1024,7 +1024,7 @@ const exists = await window.whiz.fs.exists("/path/to/file");
 
 ```ts
 {
-  name: "WhizFsError",
+  name: "WatyFsError",
   code: "FS_NOT_FOUND" | "FS_PERMISSION_DENIED" | "FS_IO_ERROR" | ...,
   message: string,
   stack?: string,
@@ -1046,23 +1046,23 @@ const exists = await window.whiz.fs.exists("/path/to/file");
 所有方法返回 Promise。
 
 ```js
-await window.whiz.window.setTitle("New Title");
-await window.whiz.window.getSize();          // await 后得到 { width, height }
-await window.whiz.window.setPosition(x, y);
-await window.whiz.window.center();
-await window.whiz.window.maximize();
-await window.whiz.window.minimize();
-await window.whiz.window.restore();
-await window.whiz.window.close();
-await window.whiz.window.hide();
-await window.whiz.window.show();
-await window.whiz.window.focus();
-await window.whiz.window.setAlwaysOnTop(true);
-await window.whiz.window.setDecorated(false);
-await window.whiz.window.openDevTools();
-await window.whiz.window.isMaximized();
-await window.whiz.window.isMinimized();
-await window.whiz.window.isVisible();
+await window.waty.window.setTitle("New Title");
+await window.waty.window.getSize();          // await 后得到 { width, height }
+await window.waty.window.setPosition(x, y);
+await window.waty.window.center();
+await window.waty.window.maximize();
+await window.waty.window.minimize();
+await window.waty.window.restore();
+await window.waty.window.close();
+await window.waty.window.hide();
+await window.waty.window.show();
+await window.waty.window.focus();
+await window.waty.window.setAlwaysOnTop(true);
+await window.waty.window.setDecorated(false);
+await window.waty.window.openDevTools();
+await window.waty.window.isMaximized();
+await window.waty.window.isMinimized();
+await window.waty.window.isVisible();
 ```
 
 平台不支持的操作会抛出错误 / reject。
@@ -1078,7 +1078,7 @@ await window.whiz.window.isVisible();
 ```js
 // 打开文件选择对话框
 // 返回: { canceled: boolean, filePaths: string[] }
-const result = await window.whiz.dialog.showOpenDialog({
+const result = await window.waty.dialog.showOpenDialog({
     title: "选择文件",
     defaultPath: "/home/user",
     multiSelect: false,
@@ -1096,7 +1096,7 @@ if (!result.canceled) {
 
 // 保存文件对话框
 // 返回: { canceled: boolean, filePath: string }
-const saveResult = await window.whiz.dialog.showSaveDialog({
+const saveResult = await window.waty.dialog.showSaveDialog({
     title: "保存文件",
     defaultName: "document.txt",
     filters: [{ name: "Text", extensions: ["txt"] }]
@@ -1139,7 +1139,7 @@ if (!saveResult.canceled) {
 ```js
 // 显示原生消息框
 // 返回: { response: number, checkboxChecked: boolean }
-const msgResult = await window.whiz.dialog.showMessageBox({
+const msgResult = await window.waty.dialog.showMessageBox({
     type: "question",          // 图标类型，可选 "none" | "info" | "warning" | "error" | "question"，默认 "none"
     title: "确认操作",
     message: "确定要删除这个文件吗？",
@@ -1209,7 +1209,7 @@ console.log(msgResult.checkboxChecked);  // 复选框状态
 
 ```ts
 {
-  name: "WhizDialogError",
+  name: "WatyDialogError",
   code: "DIALOG_PERMISSION_DENIED" | "DIALOG_PLATFORM_ERROR" | "DIALOG_INVALID_ARGUMENT" | "DIALOG_INTERNAL",
   message: string,
   stack?: string,
@@ -1282,7 +1282,7 @@ ww->ipcHandle("get-user", [](const nlohmann::json& args) -> std::future<nlohmann
 ### 9.3 JS 侧调用
 
 ```js
-const res = await window.whiz.ipc.invoke("get-user", { id: 1 });
+const res = await window.waty.ipc.invoke("get-user", { id: 1 });
 console.log(res.name); // "Alice"
 ```
 
@@ -1293,19 +1293,19 @@ ww->emit("server-message", {{"text", "Hello from C++"}});
 ```
 
 ```js
-window.whiz.ipc.on("server-message", (data) => {
+window.waty.ipc.on("server-message", (data) => {
     console.log(data.text);
 });
 ```
 
 ---
 
-## 10. TypeScript 全局声明 (`whiz.d.ts`)
+## 10. TypeScript 全局声明 (`waty.d.ts`)
 
 ```ts
 declare global {
     interface Window {
-        whiz: {
+        waty: {
             ipc?: {
                 invoke(event: string, ...args: any[]): Promise<any>;
 
@@ -1401,7 +1401,7 @@ export {};
 
 ## 11. 调试与日志
 
-- **DevTools**：C++ 侧 `ww->openDevTools()`，JS 侧 `window.whiz.window.openDevTools()`；均需在 `ApplicationOptions.permissions.devtools` 中启用（JS 侧同时受 `permissions.window` 控制）。未启用时 C++ 抛出异常、JS Promise reject。Release 下不做自动空操作，由使用者自行控制。
+- **DevTools**：C++ 侧 `ww->openDevTools()`，JS 侧 `window.waty.window.openDevTools()`；均需在 `ApplicationOptions.permissions.devtools` 中启用（JS 侧同时受 `permissions.window` 控制）。未启用时 C++ 抛出异常、JS Promise reject。Release 下不做自动空操作，由使用者自行控制。
 - **统一日志**：C++ 侧日志输出到控制台；若设置了 `ApplicationOptions.logFile`，同时写入文件。相对路径相对于可执行文件目录，建议使用 `getPath` 拼接绝对路径。
 - **logFile 父目录不存在时**，自动循环创建多级目录，创建失败则记录警告并仅输出到控制台
 - **JS 日志转发**：当 `permissions.log = true` 时，JS 的 `console.log/warn/error` 会转发到 C++ 日志。
@@ -1410,19 +1410,19 @@ export {};
     **该事件不覆盖原生崩溃**：例如 C++ 未捕获异常、段错误（SIGSEGV）、空指针访问、栈溢出、`std::terminate`、操作系统级信号崩溃等，均不会触发 `js-error-crash`。
     
     ```cpp
-    app.on("js-error-crash", [](whiz::Event&, const nlohmann::json& error) {
+    app.on("js-error-crash", [](waty::Event&, const nlohmann::json& error) {
         // 记录错误信息
     });
     ```
 
-- **对话框诊断**：`showMessageBox` 在各平台的实现路径不同（详见 8.5.3），Whiz 会在初始化时记录当前使用的原生 API、GTK 版本（Linux），以及当前平台是否支持 `checkboxLabel`，便于排查外观/行为差异。
+- **对话框诊断**：`showMessageBox` 在各平台的实现路径不同（详见 8.5.3），Waty 会在初始化时记录当前使用的原生 API、GTK 版本（Linux），以及当前平台是否支持 `checkboxLabel`，便于排查外观/行为差异。
 - **事件循环任务诊断**：`onEventLoopTick` 任务数量会随日志级别输出；任务回调中抛出的异常会被捕获并记录，便于定位接入的外部事件源问题。
 
 ---
 
 ## 12. 与 Electron 的对照
 
-| Electron | Whiz | 说明 |
+| Electron | Waty | 说明 |
 |---|---|---|
 | `BrowserWindow` | `WebWindow` | 窗口 + WebView 聚合 |
 | `loadURL(url)` | `loadURL(url)` | 直接对应，继承 Saucer 默认配置 |
@@ -1431,30 +1431,30 @@ export {};
 | `ipcMain.handle` | `ww->ipcHandle(event, cb)` | C++/JS 互操作，异步 JSON，回调返回 `std::future<json>` |
 | `webContents.send` | `ww->emit` | C++ 主动推送 JS |
 | `app.quit()` | `app.quit()` | 直接对应 |
-| `asar` 打包 | `whiz_embed` | 资源嵌入二进制 |
-| 前端构建 | 使用者自选 | Whiz 不介入 |
-| `fs` 模块 | `window.whiz.fs` | 独立桥接，需显式开启权限，无路径白名单 |
-| `os` 模块 | `window.whiz.os` | 需显式开启权限，含 `getPath`，全部异步 |
-| 窗口控制 | `window.whiz.window` | 需 `permissions.window` |
-| `dialog.showOpenDialog` | `window.whiz.dialog.showOpenDialog` | 基于 `saucer/desktop` File-Picker，需 `permissions.dialog` |
-| `dialog.showSaveDialog` | `window.whiz.dialog.showSaveDialog` | 同上 |
-| `dialog.showMessageBox` | `window.whiz.dialog.showMessageBox` | 基于 Saucer Native API，平台原生实现 |
+| `asar` 打包 | `waty_embed` | 资源嵌入二进制 |
+| 前端构建 | 使用者自选 | Waty 不介入 |
+| `fs` 模块 | `window.waty.fs` | 独立桥接，需显式开启权限，无路径白名单 |
+| `os` 模块 | `window.waty.os` | 需显式开启权限，含 `getPath`，全部异步 |
+| 窗口控制 | `window.waty.window` | 需 `permissions.window` |
+| `dialog.showOpenDialog` | `window.waty.dialog.showOpenDialog` | 基于 `saucer/desktop` File-Picker，需 `permissions.dialog` |
+| `dialog.showSaveDialog` | `window.waty.dialog.showSaveDialog` | 同上 |
+| `dialog.showMessageBox` | `window.waty.dialog.showMessageBox` | 基于 Saucer Native API，平台原生实现 |
 | 单实例锁 | `app.requestSingleInstanceLock()` | 直接对应，返回 false 应立即 `app.quit()` |
-| `app.on('window-all-closed', ...)` | `app.on("window-all-closed", ...)` + `Event::preventDefault()` | Whiz 保留平台默认；可用 `preventDefault()` 阻止默认退出。Electron 无 `preventDefault`，通常由监听器条件调用 `app.quit()`。 |
+| `app.on('window-all-closed', ...)` | `app.on("window-all-closed", ...)` + `Event::preventDefault()` | Waty 保留平台默认；可用 `preventDefault()` 阻止默认退出。Electron 无 `preventDefault`，通常由监听器条件调用 `app.quit()`。 |
 
-> Whiz 额外提供 `ipc.createInvoker` 用于自定义超时与取消，Electron 对应能力需通过第三方或自行实现。
+> Waty 额外提供 `ipc.createInvoker` 用于自定义超时与取消，Electron 对应能力需通过第三方或自行实现。
 
-> Whiz 额外提供 `Application::onEventLoopTick` 作为事件循环扩展点；Electron 无直接对应能力，通常需在 `app.whenReady()` 后自行启动定时器或监听外部事件源。
+> Waty 额外提供 `Application::onEventLoopTick` 作为事件循环扩展点；Electron 无直接对应能力，通常需在 `app.whenReady()` 后自行启动定时器或监听外部事件源。
 
 ---
 
 ## 13. 目录结构
 
 ```txt
-whiz/
+waty/
 ├── CMakeLists.txt
 ├── include/
-│   └── whiz/
+│   └── waty/
 │       ├── application.hpp
 │       ├── web_window.hpp
 │       ├── options.hpp
@@ -1468,10 +1468,10 @@ whiz/
 │   ├── js_bridge.cpp
 │   ├── fs_bridge.cpp
 │   └── dialog_bridge.cpp       # 对话框实现
-├── web/  # 默认示例前端，使用者需在CMake中用whiz_embed指定前端根目录
+├── web/  # 默认示例前端，使用者需在CMake中用waty_embed指定前端根目录
 │   └── index.html
 ├── types/
-│   └── whiz.d.ts  # TypeScript 全局声明
+│   └── waty.d.ts  # TypeScript 全局声明
 └── docs/
     └── README.md
 ```
@@ -1480,7 +1480,7 @@ whiz/
 
 ## 14. 设计边界
 
-**Whiz 提供：**
+**Waty 提供：**
 
 - 窗口与 WebView 生命周期管理
 - C++/JS 双向异步调用（JSON）
@@ -1493,7 +1493,7 @@ whiz/
 - 窗口控制、单实例锁
 - 应用退出默认行为的事件级控制（`window-all-closed` 可 `preventDefault`）
 
-**Whiz 不提供：**
+**Waty 不提供：**
 
 - 前端构建流程（由使用者自行使用前端工具构建，如：`npm run build`）
 - 本地开发服务器（使用者可用 Vite 等工具的 dev server）
@@ -1502,18 +1502,18 @@ whiz/
 - 文件系统路径白名单（由系统或容器工具负责）
 - C++ 侧 IPC 取消令牌（如需真正取消 C++ 任务，由使用者自行实现）
 - 自定义 HTML 对话框渲染（由前端框架负责）
-- 平台原生事件源（如 fd 监听、隐藏窗口消息）的直接封装；如外部事件源能以 fd 形式接入平台主循环，应由对应扩展库自行完成，Whiz 仅提供 `onEventLoopTick` 作为通用兜底
+- 平台原生事件源（如 fd 监听、隐藏窗口消息）的直接封装；如外部事件源能以 fd 形式接入平台主循环，应由对应扩展库自行完成，Waty 仅提供 `onEventLoopTick` 作为通用兜底
 
 ---
 
 ## 15. 安全说明
 
-- `window.whiz.fs` 参考 Node.js，**默认关闭**。仅当 `permissions.fs.read` / `permissions.fs.write` 为 `true` 时才可访问。Whiz 不对路径做白名单限制，路径访问安全由操作系统或容器工具负责。
-- `window.whiz.os` 会泄露系统信息，默认关闭。`getPath` 同样受此权限控制，且为异步 API。
-- `window.whiz.window` 窗口控制默认关闭，需 `permissions.window = true`。
-- `window.whiz.dialog` 默认关闭，需 `permissions.dialog = true`。文件选择对话框会将用户选择的完整文件系统路径暴露给 JS 环境。`showMessageBox` 不涉及文件系统路径，但仍是原生 UI 调用，受同一权限控制。
+- `window.waty.fs` 参考 Node.js，**默认关闭**。仅当 `permissions.fs.read` / `permissions.fs.write` 为 `true` 时才可访问。Waty 不对路径做白名单限制，路径访问安全由操作系统或容器工具负责。
+- `window.waty.os` 会泄露系统信息，默认关闭。`getPath` 同样受此权限控制，且为异步 API。
+- `window.waty.window` 窗口控制默认关闭，需 `permissions.window = true`。
+- `window.waty.dialog` 默认关闭，需 `permissions.dialog = true`。文件选择对话框会将用户选择的完整文件系统路径暴露给 JS 环境。`showMessageBox` 不涉及文件系统路径，但仍是原生 UI 调用，受同一权限控制。
 - `showMessageBox` 通过 Saucer Native API 调用平台原生实现，不经过 WebView 渲染，因此不受 `loadURL` 安全策略的约束。
-- `DevTools` 默认关闭，生产环境请勿随意开启。权限关闭时，C++ 调用 `ww->openDevTools()` 会抛出异常、JS 调用 `window.whiz.window.openDevTools()` 会 reject，不会被静默忽略。
+- `DevTools` 默认关闭，生产环境请勿随意开启。权限关闭时，C++ 调用 `ww->openDevTools()` 会抛出异常、JS 调用 `window.waty.window.openDevTools()` 会 reject，不会被静默忽略。
 - 图标路径解析会同时尝试嵌入资源和可执行文件目录，找不到时使用系统默认图标并记录日志。
 - IPC 请求回调（`ipcHandle`）在线程池中执行，注意线程安全，不要直接操作 UI。
 - 窗口事件回调（`windowEventHandle`）在 UI 线程执行。
@@ -1521,9 +1521,9 @@ whiz/
 - 对话框方法（`showOpenDialog` / `showSaveDialog` / `showMessageBox`）**必须在 UI 线程调用**；违反时会被拒绝并记录警告。
 - `emit` 线程安全，但消息投递到 UI 线程执行，存在微小延迟。
 - `loadFile` 会规范化路径并禁止 `../` 跳出嵌入根目录。
-- `loadURL` 默认继承 Saucer 的默认配置，Whiz 不做额外修改。
+- `loadURL` 默认继承 Saucer 的默认配置，Waty 不做额外修改。
 - `ipc.createInvoker` 的 `signal` 是共享的：`abort()` 会影响该 invoker 的所有未完成调用与后续调用。如需独立取消，请为每次调用创建独立 invoker。
-- JS 侧超时或取消后，C++ 侧 future 仍会执行到完成，结果被丢弃；Whiz 不提供 C++ 侧取消令牌，如需真正取消，请由使用者在回调内自行实现。
+- JS 侧超时或取消后，C++ 侧 future 仍会执行到完成，结果被丢弃；Waty 不提供 C++ 侧取消令牌，如需真正取消，请由使用者在回调内自行实现。
 - Linux 上 GTK 版本低于 4.10 时，`showMessageBox` 会回退到旧版 API。如果应用对对话框外观有严格要求，请在使用者文档中明确标注 GTK 4.10+ 为推荐版本。
 - 若在 `window-all-closed` 中阻止默认退出，应用可能继续驻留，需自行管理退出时机与单实例锁释放。
 

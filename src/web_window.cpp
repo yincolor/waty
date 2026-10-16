@@ -1,4 +1,4 @@
-#include <whiz/web_window.hpp>
+#include <waty/web_window.hpp>
 
 #include "detail.hpp"
 
@@ -20,11 +20,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace whiz::detail
+namespace waty::detail
 {
     namespace
     {
-        // 使用 Meyers 单例，避免静态初始化顺序问题（whiz_embed 生成的静态初始化器
+        // 使用 Meyers 单例，避免静态初始化顺序问题（waty_embed 生成的静态初始化器
         // 在程序启动早期调用 register_embedded_resource，此时全局 map 可能尚未构造）。
         std::mutex &embed_mutex()
         {
@@ -78,7 +78,7 @@ namespace whiz::detail
         std::filesystem::path fs_path(path);
         if (fs_path.is_relative())
         {
-            fs_path = std::filesystem::path(whiz::detail::executable_dir()) / fs_path;
+            fs_path = std::filesystem::path(waty::detail::executable_dir()) / fs_path;
         }
 
         std::error_code ec;
@@ -103,7 +103,7 @@ namespace whiz::detail
             auto *surface = gtk_native_get_surface(GTK_NATIVE(gtk_window));
             if (!surface)
             {
-                log_message("warn", "whiz: 无法获取 GdkSurface，窗口图标设置失败");
+                log_message("warn", "waty: 无法获取 GdkSurface，窗口图标设置失败");
                 return;
             }
 
@@ -120,7 +120,7 @@ namespace whiz::detail
             if (!texture)
             {
                 log_message("warn",
-                            "whiz: 无法加载窗口图标: " + std::string(error ? error->message : "未知错误"));
+                            "waty: 无法加载窗口图标: " + std::string(error ? error->message : "未知错误"));
                 if (error)
                 {
                     g_error_free(error);
@@ -152,7 +152,7 @@ namespace whiz::detail
         auto *gtk_window = window.native<true>().window;
         if (!gtk_window)
         {
-            log_message("warn", "whiz: 无法获取 GtkWindow，窗口图标设置失败");
+            log_message("warn", "waty: 无法获取 GtkWindow，窗口图标设置失败");
             return;
         }
 
@@ -173,9 +173,9 @@ namespace whiz::detail
         window.set_icon(icon);
 #endif
     }
-} // namespace whiz::detail
+} // namespace waty::detail
 
-namespace whiz
+namespace waty
 {
     namespace
     {
@@ -183,7 +183,7 @@ namespace whiz
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8">
-    <title>whiz</title>
+    <title>waty</title>
     <style>
         body { font-family: system-ui, sans-serif; display: grid; place-items: center; height: 100vh; margin: 0; }
         main { text-align: center; }
@@ -193,8 +193,8 @@ namespace whiz
 </head>
 <body>
     <main>
-        <h1>🚀 whiz</h1>
-        <p>whiz 核心库运行成功</p>
+        <h1>🚀 waty</h1>
+        <p>waty 核心库运行成功</p>
     </main>
 </body>
 </html>
@@ -204,7 +204,7 @@ namespace whiz
         {
             static std::once_flag once;
             std::call_once(once, [] {
-                // 仅在用户未通过 whiz_embed 注册同名资源时，注入默认页。
+                // 仅在用户未通过 waty_embed 注册同名资源时，注入默认页。
                 if (!detail::find_embedded_resource("index.html"))
                 {
                     detail::register_embedded_resource("index.html", g_default_index);
@@ -219,15 +219,15 @@ namespace whiz
 
             if (normalized.empty())
             {
-                throw std::invalid_argument("whiz: loadFile 的 entry 不能为空");
+                throw std::invalid_argument("waty: loadFile 的 entry 不能为空");
             }
             if (normalized.front() == '/')
             {
-                throw std::invalid_argument("whiz: loadFile 的 entry 必须是相对路径: " + std::string(entry));
+                throw std::invalid_argument("waty: loadFile 的 entry 必须是相对路径: " + std::string(entry));
             }
             if (normalized == ".." || normalized.starts_with("../"))
             {
-                throw std::invalid_argument("whiz: loadFile 的路径越出嵌入根目录: " + std::string(entry));
+                throw std::invalid_argument("waty: loadFile 的路径越出嵌入根目录: " + std::string(entry));
             }
             return normalized;
         }
@@ -289,7 +289,7 @@ namespace whiz
     {
         if (entry.empty())
         {
-            throw std::invalid_argument("whiz: loadFile 的 entry 不能为空");
+            throw std::invalid_argument("waty: loadFile 的 entry 不能为空");
         }
         const auto normalized = normalize_embedded_path(entry);
 
@@ -336,7 +336,7 @@ namespace whiz
     void WebWindow::setSize(int width, int height)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->cached_size = {width, height};
         m_impl->window->set_size({width, height});
     }
@@ -344,7 +344,7 @@ namespace whiz
     void WebWindow::setMinSize(int width, int height)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->min_width  = width;
         m_impl->min_height = height;
         m_impl->window->set_min_size({width, height});
@@ -369,7 +369,7 @@ namespace whiz
     void WebWindow::setPosition(int x, int y)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->cached_position = {x, y};
         m_impl->window->set_position({x, y});
         m_impl->window_events.emit("move", nlohmann::json{{"x", x}, {"y", y}});
@@ -384,7 +384,7 @@ namespace whiz
     void WebWindow::center()
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window || !m_impl->saucer_app) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window || !m_impl->saucer_app) throw std::logic_error("waty: 窗口尚未创建");
 
         const auto screens = m_impl->saucer_app->screens();
         if (screens.empty())
@@ -401,21 +401,21 @@ namespace whiz
     void WebWindow::maximize()
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->window->set_maximized(true);
     }
 
     void WebWindow::minimize()
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->window->set_minimized(true);
     }
 
     void WebWindow::restore()
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->window->set_maximized(false);
         m_impl->window->set_minimized(false);
     }
@@ -458,14 +458,14 @@ namespace whiz
     void WebWindow::focus()
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->window->focus();
     }
 
     void WebWindow::setAlwaysOnTop(bool enabled)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
-        if (!m_impl->window) throw std::logic_error("whiz: 窗口尚未创建");
+        if (!m_impl->window) throw std::logic_error("waty: 窗口尚未创建");
         m_impl->window->set_always_on_top(enabled);
     }
 
@@ -532,7 +532,7 @@ namespace whiz
     {
         if (!k_window_events.contains(std::string(event)))
         {
-            throw std::invalid_argument("whiz: 未知窗口事件: " + std::string(event));
+            throw std::invalid_argument("waty: 未知窗口事件: " + std::string(event));
         }
         return m_impl->window_events.on(std::string(event), std::move(callback));
     }
@@ -551,7 +551,7 @@ namespace whiz
         auto window = saucer::window::create(app);
         if (!window)
         {
-            throw std::runtime_error("whiz: 创建原生窗口失败: " + window.error().message());
+            throw std::runtime_error("waty: 创建原生窗口失败: " + window.error().message());
         }
         m_impl->window = std::move(*window);
 
@@ -588,7 +588,7 @@ namespace whiz
         auto view = saucer::webview::create({.window = m_impl->window});
         if (!view)
         {
-            throw std::runtime_error("whiz: 创建 WebView 失败: " + view.error().message());
+            throw std::runtime_error("waty: 创建 WebView 失败: " + view.error().message());
         }
         m_impl->view = std::make_unique<saucer::webview>(std::move(*view));
 
@@ -616,7 +616,7 @@ namespace whiz
             executor.resolve(std::move(response));
         });
 
-        // 原生窗口事件 → whiz 窗口事件
+        // 原生窗口事件 → waty 窗口事件
         m_impl->window->on<saucer::window::event::close>({{.func = [this]() -> saucer::policy {
             return m_impl->window_events.emit("close") ? saucer::policy::block : saucer::policy::allow;
         }, .clearable = false}});
@@ -685,7 +685,7 @@ namespace whiz
     {
         if (!m_impl->app || !m_impl->app->m_impl->permissions.devtools)
         {
-            throw std::runtime_error("whiz: DevTools 未启用（permissions.devtools=false）");
+            throw std::runtime_error("waty: DevTools 未启用（permissions.devtools=false）");
         }
         std::lock_guard<std::mutex> lock(m_impl->mutex);
         if (m_impl->view)
@@ -693,4 +693,4 @@ namespace whiz
             m_impl->view->set_dev_tools(true);
         }
     }
-} // namespace whiz
+} // namespace waty

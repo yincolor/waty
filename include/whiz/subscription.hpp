@@ -4,7 +4,7 @@
 #include <memory>
 #include <mutex>
 
-namespace whiz
+namespace waty
 {
     /// 订阅句柄（见文档 7.2.1）。
     /// 不可拷贝，可移动；只有显式调用 unsubscribe() 才会取消订阅（析构不会自动取消）。
@@ -76,4 +76,4 @@ namespace whiz
       private:
         std::shared_ptr<State> m_state;
     };
-} // namespace whiz
+} // namespace waty

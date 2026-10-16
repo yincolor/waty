@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(whiz LANGUAGES CXX VERSION 3.4.2)
+project(waty LANGUAGES CXX VERSION 3.4.2)
 
 include(FetchContent)
 
@@ -35,29 +35,29 @@ endif()
 FetchContent_MakeAvailable(saucer nlohmann_json)
 
 # ---------------------------------------------------------------------------
-# whiz 库
+# waty 库
 # ---------------------------------------------------------------------------
 
-include(cmake/whiz_embed.cmake)
+include(cmake/waty_embed.cmake)
 
-add_library(whiz STATIC
+add_library(waty STATIC
     src/application.cpp
     src/web_window.cpp
     src/js_bridge.cpp
     src/fs_bridge.cpp
     src/dialog_bridge.cpp
 )
-add_library(whiz::whiz ALIAS whiz)
+add_library(waty::waty ALIAS waty)
 
-target_compile_features(whiz PUBLIC cxx_std_23)
-set_target_properties(whiz PROPERTIES CXX_EXTENSIONS OFF)
+target_compile_features(waty PUBLIC cxx_std_23)
+set_target_properties(waty PROPERTIES CXX_EXTENSIONS OFF)
 
-target_include_directories(whiz PUBLIC
+target_include_directories(waty PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(whiz
+target_link_libraries(waty
     PUBLIC nlohmann_json::nlohmann_json
     PRIVATE saucer::saucer
 )
@@ -69,5 +69,5 @@ if(UNIX AND NOT APPLE)
     pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
     pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET libadwaita-1)
     pkg_check_modules(WEBKITGTK REQUIRED IMPORTED_TARGET webkitgtk-6.0)
-    target_link_libraries(whiz PRIVATE PkgConfig::GTK4 PkgConfig::LIBADWAITA PkgConfig::WEBKITGTK)
+    target_link_libraries(waty PRIVATE PkgConfig::GTK4 PkgConfig::LIBADWAITA PkgConfig::WEBKITGTK)
 endif()

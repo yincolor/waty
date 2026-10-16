@@ -1,10 +1,10 @@
 
 
-# whiz 项目维护指南
+# waty 项目维护指南
 
 ## 项目概述
 
-whiz 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架，目标是提供类似 Electron 的开发体验：用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。项目当前版本为 `v3.4.2`，采用 **AGPL-3.0** 许可证。
+waty 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架，目标是提供类似 Electron 的开发体验：用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。项目当前版本为 `v3.4.2`，采用 **AGPL-3.0** 许可证。
 
 ## 技术栈
 
@@ -13,7 +13,7 @@ whiz 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架�
 | 核心语言 | C++23 |
 | 构建系统 | CMake 3.25+ |
 | 底层库 | Saucer（跨平台 WebView 封装） |
-| 前端嵌入 | `whiz_embed` CMake 函数 |
+| 前端嵌入 | `waty_embed` CMake 函数 |
 | 许可证 | GNU Affero General Public License v3.0 |
 
 ## 环境要求
@@ -38,19 +38,19 @@ g++-14 --version   # 或其他支持 C++23 的编译器
 ## 项目结构
 
 ```
-whiz/
+waty/
 ├── cmake/ # CMake 辅助模块
-│   └── whiz_embed.cmake
+│   └── waty_embed.cmake
 ├── web/ # 示例前端页面（参考用）
 │   └── index.html
 ├── DESIGN.md # 完整设计文档
 ├── CMakeLists.txt # 顶层构建配置
 ├── LICENSE # AGPL-3.0协议
 ├── README.md
-└── test # 测试代码放在这里，避免污染其他地方;已经有一个whiz-app-template测试项目可以用于测试了，直接改这个即可，把测试样例中连接目标改为编译的新的静态库
+└── test # 测试代码放在这里，避免污染其他地方;已经有一个waty-app-template测试项目可以用于测试了，直接改这个即可，把测试样例中连接目标改为编译的新的静态库
 ```
 
-> 注：`cmake/whiz_embed.cmake` 是提供给使用者的资源嵌入函数，位于 `whiz_SOURCE_DIR/cmake/` 路径下。
+> 注：`cmake/waty_embed.cmake` 是提供给使用者的资源嵌入函数，位于 `waty_SOURCE_DIR/cmake/` 路径下。
 
 ## 常用开发命令
 
@@ -61,7 +61,7 @@ cmake -B build -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
-产物为 `libwhiz.a`。
+产物为 `libwaty.a`。
 
 ### Release 构建
 
@@ -82,7 +82,7 @@ cmake --build build -j
 ### 1. 同步上游
 
 ```bash
-git remote add upstream https://github.com/yincolor/whiz.git
+git remote add upstream https://github.com/yincolor/waty.git
 git fetch upstream
 git checkout main
 git merge upstream/main
@@ -114,15 +114,15 @@ cmake --build build -j
 构建通过后，使用 README 中的最小示例进行冒烟测试：
 
 ```cpp
-#include <whiz>
+#include <waty>
 
 int main() {
-    whiz::ApplicationOptions app_opts;
-    app_opts.appName = "Whiz Demo";
-    whiz::Application app(app_opts);
+    waty::ApplicationOptions app_opts;
+    app_opts.appName = "Waty Demo";
+    waty::Application app(app_opts);
 
-    whiz::WebWindowOptions win_opts;
-    win_opts.title = "Hello whiz";
+    waty::WebWindowOptions win_opts;
+    win_opts.title = "Hello waty";
     win_opts.width = 800;
     win_opts.height = 600;
 
@@ -142,17 +142,17 @@ project(my_app LANGUAGES CXX)
 
 include(FetchContent)
 FetchContent_Declare(
-    whiz
-    GIT_REPOSITORY https://github.com/yincolor/whiz.git
+    waty
+    GIT_REPOSITORY https://github.com/yincolor/waty.git
     GIT_TAG v3.4.2
 )
-FetchContent_MakeAvailable(whiz)
+FetchContent_MakeAvailable(waty)
 
 add_executable(my_app main.cpp)
 
-# whiz_embed 在 FetchContent_MakeAvailable(whiz) 后可直接使用
-whiz_embed("${CMAKE_CURRENT_SOURCE_DIR}/web")
-target_link_libraries(my_app PRIVATE whiz::whiz whiz::embedded)
+# waty_embed 在 FetchContent_MakeAvailable(waty) 后可直接使用
+waty_embed("${CMAKE_CURRENT_SOURCE_DIR}/web")
+target_link_libraries(my_app PRIVATE waty::waty waty::embedded)
 ```
 
 ### 6. 提交前检查
@@ -180,8 +180,8 @@ docs: 更新 README / DESIGN.md
 - **C++ 标准**：严格使用 C++23 特性，不降级到 C++20 或更低。
 - **命名风格**：类名用 PascalCase，函数与变量用 camelCase，常量用 UPPER_SNAKE_CASE。
 - **头文件保护**：优先使用 `#pragma once`。
-- **命名空间**：所有公开 API 位于 `whiz` 命名空间下。
-- **CMake**：变量使用 `${VAR}` 形式，目标名使用 `whiz::whiz` 别名。
+- **命名空间**：所有公开 API 位于 `waty` 命名空间下。
+- **CMake**：变量使用 `${VAR}` 形式，目标名使用 `waty::waty` 别名。
 
 ## 关键 API 参考
 
@@ -189,10 +189,10 @@ docs: 更新 README / DESIGN.md
 
 | 类名 | 用途 |
 |------|------|
-| `whiz::Application` | 应用生命周期管理 |
-| `whiz::ApplicationOptions` | 应用配置（`appName` 等） |
-| `whiz::WebWindow` | 窗口与 WebView 容器 |
-| `whiz::WebWindowOptions` | 窗口配置（`title`、`width`、`height`） |
+| `waty::Application` | 应用生命周期管理 |
+| `waty::ApplicationOptions` | 应用配置（`appName` 等） |
+| `waty::WebWindow` | 窗口与 WebView 容器 |
+| `waty::WebWindowOptions` | 窗口配置（`title`、`width`、`height`） |
 
 ### 关键方法
 
@@ -203,7 +203,7 @@ docs: 更新 README / DESIGN.md
 
 ## 权限模型
 
-whiz 采用**显式权限**设计：暴露给 JS 的能力默认关闭，IPC 基础能力默认开启。更新代码时若新增 JS 桥接能力，需在文档中明确标注该能力的权限状态。
+waty 采用**显式权限**设计：暴露给 JS 的能力默认关闭，IPC 基础能力默认开启。更新代码时若新增 JS 桥接能力，需在文档中明确标注该能力的权限状态。
 
 ## 网络与代理
 
@@ -248,5 +248,5 @@ sudo apt install libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev libjson-glib
 
 **Q：想更改嵌入的入口 HTML 文件？**
 
-修改 `whiz_embed("path/to/web")` 中的目录路径，然后重新构建。
+修改 `waty_embed("path/to/web")` 中的目录路径，然后重新构建。
 

@@ -1,20 +1,20 @@
-# whiz_embed：将指定目录下的所有文件生成嵌入式资源源文件，并创建独立资源目标。
+# waty_embed：将指定目录下的所有文件生成嵌入式资源源文件，并创建独立资源目标。
 #
 # 用法：
-#   whiz_embed(<directory> [NAME <name>])
+#   waty_embed(<directory> [NAME <name>])
 #
-# 默认目标别名 whiz::embedded；通过 target_link_libraries(my_app PRIVATE whiz::embedded) 链接。
-# 支持通过 NAME 创建多个独立资源目标，如 whiz_embed("${dir}" NAME ui)。
+# 默认目标别名 waty::embedded；通过 target_link_libraries(my_app PRIVATE waty::embedded) 链接。
+# 支持通过 NAME 创建多个独立资源目标，如 waty_embed("${dir}" NAME ui)。
 
-function(_whiz_generate_embedded_sources directory target out_var)
+function(_waty_generate_embedded_sources directory target out_var)
     get_filename_component(web_root "${directory}" ABSOLUTE)
     if(NOT EXISTS "${web_root}")
-        message(FATAL_ERROR "whiz_embed: 目录不存在: ${web_root}")
+        message(FATAL_ERROR "waty_embed: 目录不存在: ${web_root}")
     endif()
 
-    file(GLOB_RECURSE whiz_embed_files CONFIGURE_DEPENDS "${web_root}/*")
+    file(GLOB_RECURSE waty_embed_files CONFIGURE_DEPENDS "${web_root}/*")
 
-    set(gen_dir "${CMAKE_CURRENT_BINARY_DIR}/whiz_embedded/${target}")
+    set(gen_dir "${CMAKE_CURRENT_BINARY_DIR}/waty_embedded/${target}")
     file(MAKE_DIRECTORY "${gen_dir}")
     set(gen_cpp "${gen_dir}/resources.cpp")
 
@@ -22,7 +22,7 @@ function(_whiz_generate_embedded_sources directory target out_var)
     set(registrations "")
     set(index 0)
 
-    foreach(file IN LISTS whiz_embed_files)
+    foreach(file IN LISTS waty_embed_files)
         if(IS_DIRECTORY "${file}")
             continue()
         endif()
@@ -35,9 +35,9 @@ function(_whiz_generate_embedded_sources directory target out_var)
         list(TRANSFORM bytes PREPEND "0x")
         list(JOIN bytes ", " bytes_str)
 
-        string(APPEND declarations "static const unsigned char whiz_data_${index}[] = {${bytes_str}};\n")
+        string(APPEND declarations "static const unsigned char waty_data_${index}[] = {${bytes_str}};\n")
         string(APPEND registrations
-               "    whiz::detail::register_embedded_resource(\"${rel}\", std::string(reinterpret_cast<const char *>(whiz_data_${index}), sizeof(whiz_data_${index})));\n")
+               "    waty::detail::register_embedded_resource(\"${rel}\", std::string(reinterpret_cast<const char *>(waty_data_${index}), sizeof(waty_data_${index})));\n")
 
         math(EXPR index "${index} + 1")
     endforeach()
@@ -48,34 +48,34 @@ function(_whiz_generate_embedded_sources directory target out_var)
     endif()
 
     file(WRITE "${gen_cpp}"
-"// 由 whiz_embed 自动生成，请勿手动修改。\n"
-"#include <whiz/detail/embedded.hpp>\n"
+"// 由 waty_embed 自动生成，请勿手动修改。\n"
+"#include <waty/detail/embedded.hpp>\n"
 "#include <string>\n"
 "\n"
 "namespace\n"
 "{\n"
 "${declarations}"
-"void whiz_embed_register_all()\n"
+"void waty_embed_register_all()\n"
 "{\n"
 "${registrations}"
 "}\n"
 "\n"
-"struct WhizEmbedInitializer\n"
+"struct WatyEmbedInitializer\n"
 "{\n"
-"    WhizEmbedInitializer()\n"
+"    WatyEmbedInitializer()\n"
 "    {\n"
-"        whiz_embed_register_all();\n"
+"        waty_embed_register_all();\n"
 "    }\n"
 "};\n"
 "\n"
-"static WhizEmbedInitializer g_whiz_embed_initializer;\n"
+"static WatyEmbedInitializer g_waty_embed_initializer;\n"
 "} // namespace\n"
     )
 
     set(${out_var} "${gen_cpp}" PARENT_SCOPE)
 endfunction()
 
-function(whiz_embed directory)
+function(waty_embed directory)
     cmake_parse_arguments(PARSE_ARGV 1 EMBED "" "NAME" "")
 
     if(NOT EMBED_NAME)
@@ -84,26 +84,26 @@ function(whiz_embed directory)
 
     get_filename_component(embed_dir "${directory}" ABSOLUTE)
     if(NOT EXISTS "${embed_dir}")
-        message(FATAL_ERROR "whiz_embed: 目录不存在: ${embed_dir}")
+        message(FATAL_ERROR "waty_embed: 目录不存在: ${embed_dir}")
     endif()
 
-    set(embed_lib "whiz_${EMBED_NAME}")
+    set(embed_lib "waty_${EMBED_NAME}")
 
     # 使用 OBJECT 库而非 STATIC 库：生成的 resources.cpp 仅含静态初始化器、没有外部符号，
     # STATIC 库会被链接器整段丢弃（不会拉取该 .o），导致资源静默丢失。
     add_library(${embed_lib} OBJECT)
-    add_library("whiz::${EMBED_NAME}" ALIAS ${embed_lib})
+    add_library("waty::${EMBED_NAME}" ALIAS ${embed_lib})
 
-    _whiz_generate_embedded_sources("${embed_dir}" "${embed_lib}" embed_sources)
+    _waty_generate_embedded_sources("${embed_dir}" "${embed_lib}" embed_sources)
     target_sources(${embed_lib} PRIVATE ${embed_sources})
 
     target_include_directories(${embed_lib} PUBLIC "${embed_dir}")
 
-    # 生成的 resources.cpp 需要包含 <whiz/detail/embedded.hpp>
-    get_filename_component(_whiz_include_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../include" ABSOLUTE)
-    target_include_directories(${embed_lib} PRIVATE "${_whiz_include_dir}")
+    # 生成的 resources.cpp 需要包含 <waty/detail/embedded.hpp>
+    get_filename_component(_waty_include_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../include" ABSOLUTE)
+    target_include_directories(${embed_lib} PRIVATE "${_waty_include_dir}")
 
     target_compile_features(${embed_lib} PRIVATE cxx_std_23)
 
-    message(STATUS "whiz: Created embedded resource target 'whiz::${EMBED_NAME}' from '${embed_dir}'")
+    message(STATUS "waty: Created embedded resource target 'waty::${EMBED_NAME}' from '${embed_dir}'")
 endfunction()

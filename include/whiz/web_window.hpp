@@ -1,10 +1,10 @@
 #pragma once
 
-#include <whiz/dialog.hpp>
-#include <whiz/event.hpp>
-#include <whiz/ipc_error.hpp>
-#include <whiz/options.hpp>
-#include <whiz/subscription.hpp>
+#include <waty/dialog.hpp>
+#include <waty/event.hpp>
+#include <waty/ipc_error.hpp>
+#include <waty/options.hpp>
+#include <waty/subscription.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -23,7 +23,7 @@ namespace saucer
     struct application;
 }
 
-namespace whiz
+namespace waty
 {
     class Application;
 
@@ -109,4 +109,4 @@ namespace whiz
 
         friend class Application;
     };
-} // namespace whiz
+} // namespace waty

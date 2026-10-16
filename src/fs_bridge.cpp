@@ -1,4 +1,4 @@
-#include <whiz/web_window.hpp>
+#include <waty/web_window.hpp>
 
 #include "detail.hpp"
 
@@ -18,7 +18,7 @@
 #include <thread>
 #include <unordered_map>
 
-namespace whiz::detail
+namespace waty::detail
 {
     namespace
     {
@@ -108,7 +108,7 @@ namespace whiz::detail
 
         nlohmann::json fs_error_json(const FsError &err, std::string_view syscall)
         {
-            return nlohmann::json{{"name", "WhizFsError"}, {"code", err.code}, {"message", err.what()},
+            return nlohmann::json{{"name", "WatyFsError"}, {"code", err.code}, {"message", err.what()},
                                   {"details", {{"path", err.path}, {"syscall", syscall}}}};
         }
 
@@ -309,7 +309,7 @@ namespace whiz::detail
             }
             catch (const std::exception &err)
             {
-                const auto error = nlohmann::json{{"name", "WhizFsError"}, {"code", "FS_IO_ERROR"}, {"message", err.what()},
+                const auto error = nlohmann::json{{"name", "WatyFsError"}, {"code", "FS_IO_ERROR"}, {"message", err.what()},
                                                   {"details", {{"path", req.value("path", "")}, {"syscall", req.value("op", "")}}}};
                 post_to_ui_thread(saucer_app, [impl_ptr, id, error] {
                     respond_error(*impl_ptr, id, error);
@@ -317,4 +317,4 @@ namespace whiz::detail
             }
         }).detach();
     }
-} // namespace whiz::detail
+} // namespace waty::detail

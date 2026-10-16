@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace whiz
+namespace waty
 {
     class WebWindow;
 
@@ -55,4 +55,4 @@ namespace whiz
         std::weak_ptr<WebWindow> parentWebWindow;  // 父窗口，使用 weak_ptr 避免生命周期问题
         std::string_view icon;                     // 图标路径；留空则继承 ApplicationOptions.icon
     };
-} // namespace whiz
+} // namespace waty

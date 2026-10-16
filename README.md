@@ -1,4 +1,4 @@
-# whiz
+# waty
 
 基于 Saucer + C++23 + CMake 的轻量级桌面应用框架，提供类似 Electron 的开发体验：
 用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。
@@ -6,7 +6,7 @@
 ## 特性
 
 - 窗口 / WebView / IPC 抽象，贴近 Electron 的开发模型
-- 前端资源嵌入（`whiz_embed`），入口 HTML 由 C++ 侧决定
+- 前端资源嵌入（`waty_embed`），入口 HTML 由 C++ 侧决定
 - 常用桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框
 - 权限显式化：暴露给 JS 的能力默认关闭（IPC 基础能力默认开启）
 - 作为 CMake 库，可通过 `FetchContent` 集成
@@ -26,24 +26,24 @@ cmake -B build -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
-产物为 `libwhiz.a`。
+产物为 `libwaty.a`。
 
 ## 最小示例
 
 `main.cpp`：
 
 ```cpp
-#include <whiz/application.hpp>
+#include <waty/application.hpp>
 
 int main()
 {
-    whiz::ApplicationOptions app_opts;
-    app_opts.appName = "Whiz Demo";
+    waty::ApplicationOptions app_opts;
+    app_opts.appName = "Waty Demo";
 
-    whiz::Application app(app_opts);
+    waty::Application app(app_opts);
 
-    whiz::WebWindowOptions win_opts;
-    win_opts.title  = "Hello whiz";
+    waty::WebWindowOptions win_opts;
+    win_opts.title  = "Hello waty";
     win_opts.width  = 800;
     win_opts.height = 600;
 
@@ -62,17 +62,17 @@ cmake_minimum_required(VERSION 3.25)
 project(my_app LANGUAGES CXX)
 
 include(FetchContent)
-FetchContent_Declare(whiz
-    GIT_REPOSITORY https://github.com/<you>/whiz.git
+FetchContent_Declare(waty
+    GIT_REPOSITORY https://github.com/<you>/waty.git
     GIT_TAG v3.4.2)
-FetchContent_MakeAvailable(whiz)
+FetchContent_MakeAvailable(waty)
 
 add_executable(my_app main.cpp)
 
-# whiz_embed 在 FetchContent_MakeAvailable(whiz) 后可直接使用
-whiz_embed("${CMAKE_CURRENT_SOURCE_DIR}/web")
+# waty_embed 在 FetchContent_MakeAvailable(waty) 后可直接使用
+waty_embed("${CMAKE_CURRENT_SOURCE_DIR}/web")
 
-target_link_libraries(my_app PRIVATE whiz::whiz whiz::embedded)
+target_link_libraries(my_app PRIVATE waty::waty waty::embedded)
 ```
 
 在项目里准备 `web/index.html`（本仓库 `web/` 目录提供了一个可参考的示例页面），然后：
@@ -102,7 +102,7 @@ else
 
 ## IPC
 
-C++ 侧通过 `WebWindow::ipcHandle` 响应前端的 `window.whiz.ipc.invoke(event, ...)`：
+C++ 侧通过 `WebWindow::ipcHandle` 响应前端的 `window.waty.ipc.invoke(event, ...)`：
 
 - **每个事件名只能注册一个 handler。**
 - **同一事件名重复注册会抛出 `std::logic_error`**（异常信息包含事件名）。

@@ -1,5 +1,5 @@
-#include <whiz/dialog.hpp>
-#include <whiz/web_window.hpp>
+#include <waty/dialog.hpp>
+#include <waty/web_window.hpp>
 
 #include "detail.hpp"
 
@@ -21,7 +21,7 @@
     #include <saucer/modules/stable/webkitgtk.hpp>
 #endif
 
-namespace whiz::detail
+namespace waty::detail
 {
 #if defined(__linux__)
     namespace
@@ -421,7 +421,7 @@ namespace whiz::detail
         {
             if (!o.contains("buttons") || !o["buttons"].is_array() || o["buttons"].empty())
             {
-                respond_error(impl, id, nlohmann::json{{"name", "WhizDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
+                respond_error(impl, id, nlohmann::json{{"name", "WatyDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
                                                        {"message", "buttons 至少需要一个按钮"}});
                 return;
             }
@@ -435,7 +435,7 @@ namespace whiz::detail
             else if (type == "question") message_type = MessageBoxType::Question;
             else
             {
-                respond_error(impl, id, nlohmann::json{{"name", "WhizDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
+                respond_error(impl, id, nlohmann::json{{"name", "WatyDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
                                                        {"message", "未知 type 字符串: " + type}});
                 return;
             }
@@ -462,7 +462,7 @@ namespace whiz::detail
             if (options.defaultButtonIndex < 0 ||
                 static_cast<std::size_t>(options.defaultButtonIndex) >= options.buttons.size())
             {
-                respond_error(impl, id, nlohmann::json{{"name", "WhizDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
+                respond_error(impl, id, nlohmann::json{{"name", "WatyDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
                                                        {"message", "defaultButtonIndex 越界"}});
                 return;
             }
@@ -470,7 +470,7 @@ namespace whiz::detail
                 (options.cancelButtonIndex < 0 ||
                  static_cast<std::size_t>(options.cancelButtonIndex) >= options.buttons.size()))
             {
-                respond_error(impl, id, nlohmann::json{{"name", "WhizDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
+                respond_error(impl, id, nlohmann::json{{"name", "WatyDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
                                                        {"message", "cancelButtonIndex 越界"}});
                 return;
             }
@@ -481,12 +481,12 @@ namespace whiz::detail
             return;
         }
 
-        respond_error(impl, id, nlohmann::json{{"name", "WhizDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
+        respond_error(impl, id, nlohmann::json{{"name", "WatyDialogError"}, {"code", "DIALOG_INVALID_ARGUMENT"},
                                                {"message", "未知 dialog 操作: " + op}});
     }
-} // namespace whiz::detail
+} // namespace waty::detail
 
-namespace whiz
+namespace waty
 {
     void WebWindow::showOpenDialog(const OpenDialogOptions &opts,
                                    std::function<void(std::optional<std::vector<std::string>>)> callback)
@@ -506,4 +506,4 @@ namespace whiz
     {
         detail::show_message_box_native(*m_impl, opts, std::move(callback));
     }
-} // namespace whiz
+} // namespace waty

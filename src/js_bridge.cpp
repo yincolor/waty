@@ -1,4 +1,4 @@
-#include <whiz/web_window.hpp>
+#include <waty/web_window.hpp>
 
 #include "detail.hpp"
 
@@ -17,29 +17,29 @@
 #include <string_view>
 #include <thread>
 
-namespace whiz::detail
+namespace waty::detail
 {
     namespace
     {
         // JS 桥脚本模板。@@XXX@@ 为权限占位符（"true"/"false"）。
         const char *k_bridge_script = R"js((function() {
-    if (window.__whizInit) return;
-    window.__whizInit = true;
-    window.__whizSeq = 0;
-    window.__whizPending = {};
-    window.whiz = window.whiz || {};
-    window.whiz.__listeners = {};
+    if (window.__watyInit) return;
+    window.__watyInit = true;
+    window.__watySeq = 0;
+    window.__watyPending = {};
+    window.waty = window.waty || {};
+    window.waty.__listeners = {};
 
-    window.__whizResolve = (id, value) => {
-        const p = window.__whizPending[id];
-        if (p) { delete window.__whizPending[id]; p.resolve(value); }
+    window.__watyResolve = (id, value) => {
+        const p = window.__watyPending[id];
+        if (p) { delete window.__watyPending[id]; p.resolve(value); }
     };
-    window.__whizReject = (id, error) => {
-        const p = window.__whizPending[id];
-        if (p) { delete window.__whizPending[id]; p.reject(error); }
+    window.__watyReject = (id, error) => {
+        const p = window.__watyPending[id];
+        if (p) { delete window.__watyPending[id]; p.reject(error); }
     };
-    window.__whizEmit = (event, data) => {
-        const cbs = window.whiz.__listeners[event];
+    window.__watyEmit = (event, data) => {
+        const cbs = window.waty.__listeners[event];
         if (cbs) cbs.slice().forEach(cb => { try { cb(data); } catch (e) {} });
     };
 
@@ -57,9 +57,9 @@ namespace whiz::detail
 
     const request = (channel, op, extra) => {
         return new Promise((resolve, reject) => {
-            const id = ++window.__whizSeq;
-            window.__whizPending[id] = { resolve, reject };
-            const msg = Object.assign({ __whiz: channel, id }, extra || {});
+            const id = ++window.__watySeq;
+            window.__watyPending[id] = { resolve, reject };
+            const msg = Object.assign({ __waty: channel, id }, extra || {});
             if (op !== undefined && op !== null) msg.op = op;
             window.saucer.internal.message(JSON.stringify(msg));
         });
@@ -68,37 +68,37 @@ namespace whiz::detail
     if (@@IPC@@) {
         const makeInvoke = (options) => (event, ...args) => {
             return new Promise((resolve, reject) => {
-                const id = ++window.__whizSeq;
-                window.__whizPending[id] = { resolve, reject };
+                const id = ++window.__watySeq;
+                window.__watyPending[id] = { resolve, reject };
                 if (options && options.timeout != null) {
                     setTimeout(() => {
-                        if (window.__whizPending[id]) {
-                            delete window.__whizPending[id];
-                            reject({ name: "WhizIpcError", code: "IPC_TIMEOUT", message: "IPC request timed out" });
+                        if (window.__watyPending[id]) {
+                            delete window.__watyPending[id];
+                            reject({ name: "WatyIpcError", code: "IPC_TIMEOUT", message: "IPC request timed out" });
                         }
                     }, options.timeout);
                 }
                 if (options && options.signal) {
                     const abort = () => {
-                        if (window.__whizPending[id]) {
-                            delete window.__whizPending[id];
-                            reject({ name: "WhizIpcError", code: "IPC_CANCELLED", message: "IPC request cancelled" });
+                        if (window.__watyPending[id]) {
+                            delete window.__watyPending[id];
+                            reject({ name: "WatyIpcError", code: "IPC_CANCELLED", message: "IPC request cancelled" });
                         }
                     };
                     if (options.signal.aborted) { abort(); return; }
                     options.signal.addEventListener("abort", abort, { once: true });
                 }
-                window.saucer.internal.message(JSON.stringify({ __whiz: "ipc", id, event, args }));
+                window.saucer.internal.message(JSON.stringify({ __waty: "ipc", id, event, args }));
             });
         };
-        window.whiz.ipc = {
+        window.waty.ipc = {
             invoke: makeInvoke(),
             createInvoker: (options) => makeInvoker(options),
             on: (event, callback) => {
-                if (!window.whiz.__listeners[event]) window.whiz.__listeners[event] = [];
-                window.whiz.__listeners[event].push(callback);
+                if (!window.waty.__listeners[event]) window.waty.__listeners[event] = [];
+                window.waty.__listeners[event].push(callback);
                 return () => {
-                    const list = window.whiz.__listeners[event];
+                    const list = window.waty.__listeners[event];
                     if (list) {
                         const i = list.indexOf(callback);
                         if (i >= 0) list.splice(i, 1);
@@ -109,7 +109,7 @@ namespace whiz::detail
     }
 
     if (@@OS@@) {
-        window.whiz.os = {
+        window.waty.os = {
             platform: () => request("os", "platform"),
             arch: () => request("os", "arch"),
             homedir: () => request("os", "homedir"),
@@ -119,7 +119,7 @@ namespace whiz::detail
 
     if (@@WINDOW@@) {
         const w = (op, args) => request("window", op, args ? { args } : {});
-        window.whiz.window = {
+        window.waty.window = {
             setTitle: (t) => w("setTitle", [t]),
             getSize: () => w("getSize"),
             setPosition: (x, y) => w("setPosition", [x, y]),
@@ -141,15 +141,15 @@ namespace whiz::detail
     }
 
     if (@@FS_READ@@ || @@FS_WRITE@@) {
-        window.whiz.fs = {};
+        window.waty.fs = {};
         if (@@FS_READ@@) {
-            window.whiz.fs.readFile = async (path) => {
+            window.waty.fs.readFile = async (path) => {
                 const r = await request("fs", "readFile", { path });
                 return bytesFromB64(r.base64);
             };
-            window.whiz.fs.stat = (path) => request("fs", "stat", { path });
-            window.whiz.fs.exists = (path) => request("fs", "exists", { path });
-            window.whiz.fs.createReadStream = async (path, options) => {
+            window.waty.fs.stat = (path) => request("fs", "stat", { path });
+            window.waty.fs.exists = (path) => request("fs", "exists", { path });
+            window.waty.fs.createReadStream = async (path, options) => {
                 const opened = await request("fs", "openReadStream", { path, highWaterMark: (options && options.highWaterMark) || 65536 });
                 return new ReadableStream({
                     async pull(controller) {
@@ -166,10 +166,10 @@ namespace whiz::detail
             };
         }
         if (@@FS_WRITE@@) {
-            window.whiz.fs.writeFile = async (path, data) => {
+            window.waty.fs.writeFile = async (path, data) => {
                 await request("fs", "writeFile", { path, base64: b64FromBytes(data) });
             };
-            window.whiz.fs.createWriteStream = async (path) => {
+            window.waty.fs.createWriteStream = async (path) => {
                 const opened = await request("fs", "openWriteStream", { path });
                 return new WritableStream({
                     async write(chunk) {
@@ -183,7 +183,7 @@ namespace whiz::detail
     }
 
     if (@@DIALOG@@) {
-        window.whiz.dialog = {
+        window.waty.dialog = {
             showOpenDialog: (options) => request("dialog", "showOpenDialog", { options: options || {} }),
             showSaveDialog: (options) => request("dialog", "showSaveDialog", { options: options || {} }),
             showMessageBox: (options) => request("dialog", "showMessageBox", { options })
@@ -191,18 +191,18 @@ namespace whiz::detail
     }
 
     window.addEventListener("error", (e) => {
-        window.saucer.internal.message(JSON.stringify({ __whiz: "jserror", message: e.message, source: e.filename, lineno: e.lineno, colno: e.colno }));
+        window.saucer.internal.message(JSON.stringify({ __waty: "jserror", message: e.message, source: e.filename, lineno: e.lineno, colno: e.colno }));
     });
     window.addEventListener("unhandledrejection", (e) => {
         let reason = e.reason;
         if (reason instanceof Error) reason = reason.message;
-        window.saucer.internal.message(JSON.stringify({ __whiz: "jserror", message: String(reason), source: "", lineno: 0, colno: 0 }));
+        window.saucer.internal.message(JSON.stringify({ __waty: "jserror", message: String(reason), source: "", lineno: 0, colno: 0 }));
     });
 
     if (@@LOG@@) {
         const sendLog = (level, args) => {
             try {
-                window.saucer.internal.message(JSON.stringify({ __whiz: "console", level, args: Array.from(args).map(a => (a instanceof Error ? a.message : String(a))) }));
+                window.saucer.internal.message(JSON.stringify({ __waty: "console", level, args: Array.from(args).map(a => (a instanceof Error ? a.message : String(a))) }));
             } catch (e) {}
         };
         const olog = console.log, owarn = console.warn, oerror = console.error;
@@ -246,15 +246,15 @@ namespace whiz::detail
             }
             catch (const std::invalid_argument &ex)
             {
-                return nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_INVALID_ARGUMENT"}, {"message", ex.what()}};
+                return nlohmann::json{{"name", "WatyIpcError"}, {"code", "IPC_INVALID_ARGUMENT"}, {"message", ex.what()}};
             }
             catch (const std::exception &ex)
             {
-                return nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_EXCEPTION"}, {"message", ex.what()}};
+                return nlohmann::json{{"name", "WatyIpcError"}, {"code", "IPC_HANDLER_EXCEPTION"}, {"message", ex.what()}};
             }
             catch (...)
             {
-                return nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_EXCEPTION"}, {"message", "Unknown exception"}};
+                return nlohmann::json{{"name", "WatyIpcError"}, {"code", "IPC_HANDLER_EXCEPTION"}, {"message", "Unknown exception"}};
             }
         }
 
@@ -270,7 +270,7 @@ namespace whiz::detail
                 const auto it = impl.ipc_handlers.find(event);
                 if (it == impl.ipc_handlers.end())
                 {
-                    respond_error(impl, id, nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
+                    respond_error(impl, id, nlohmann::json{{"name", "WatyIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
                                                            {"message", "No handler registered for '" + event + "'"}});
                     return;
                 }
@@ -284,7 +284,7 @@ namespace whiz::detail
             }
             if (!alive)
             {
-                respond_error(impl, id, nlohmann::json{{"name", "WhizIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
+                respond_error(impl, id, nlohmann::json{{"name", "WatyIpcError"}, {"code", "IPC_HANDLER_NOT_FOUND"},
                                                        {"message", "No handler registered for '" + event + "'"}});
                 return;
             }
@@ -359,13 +359,13 @@ namespace whiz::detail
                 else if (path == "logs") sp = SysPath::Logs;
                 else
                 {
-                    respond_error(impl, id, nlohmann::json{{"name", "WhizOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown path"}});
+                    respond_error(impl, id, nlohmann::json{{"name", "WatyOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown path"}});
                     return;
                 }
                 respond(impl, id, impl.app->getPath(sp));
                 return;
             }
-            respond_error(impl, id, nlohmann::json{{"name", "WhizOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown op"}});
+            respond_error(impl, id, nlohmann::json{{"name", "WatyOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown op"}});
         }
 
         void handle_window_request(WebWindow::Impl &impl, const nlohmann::json &req)
@@ -430,18 +430,18 @@ namespace whiz::detail
                             return;
                         }
                     }
-                    respond_error(impl, id, nlohmann::json{{"name", "WhizWindowError"}, {"code", "WINDOW_INTERNAL"}, {"message", "window not found"}});
+                    respond_error(impl, id, nlohmann::json{{"name", "WatyWindowError"}, {"code", "WINDOW_INTERNAL"}, {"message", "window not found"}});
                     return;
                 }
                 if (op == "isMaximized") { respond(impl, id, lock_window().maximized()); return; }
                 if (op == "isMinimized") { respond(impl, id, lock_window().minimized()); return; }
                 if (op == "isVisible") { respond(impl, id, lock_window().visible()); return; }
 
-                respond_error(impl, id, nlohmann::json{{"name", "WhizWindowError"}, {"code", "WINDOW_INVALID_ARGUMENT"}, {"message", "unknown op"}});
+                respond_error(impl, id, nlohmann::json{{"name", "WatyWindowError"}, {"code", "WINDOW_INVALID_ARGUMENT"}, {"message", "unknown op"}});
             }
             catch (const std::exception &ex)
             {
-                respond_error(impl, id, nlohmann::json{{"name", "WhizWindowError"}, {"code", "WINDOW_INTERNAL"}, {"message", ex.what()}});
+                respond_error(impl, id, nlohmann::json{{"name", "WatyWindowError"}, {"code", "WINDOW_INTERNAL"}, {"message", ex.what()}});
             }
         }
     } // namespace
@@ -452,7 +452,7 @@ namespace whiz::detail
         {
             return;
         }
-        impl.view->execute("window.__whizResolve(" + std::to_string(id) + "," + result.dump() + ");");
+        impl.view->execute("window.__watyResolve(" + std::to_string(id) + "," + result.dump() + ");");
     }
 
     void respond_error(WebWindow::Impl &impl, std::uint64_t id, const nlohmann::json &error)
@@ -461,7 +461,7 @@ namespace whiz::detail
         {
             return;
         }
-        impl.view->execute("window.__whizReject(" + std::to_string(id) + "," + error.dump() + ");");
+        impl.view->execute("window.__watyReject(" + std::to_string(id) + "," + error.dump() + ");");
     }
 
     void emit_to_js(WebWindow::Impl &impl, std::string_view event, const nlohmann::json &data)
@@ -470,7 +470,7 @@ namespace whiz::detail
         {
             return;
         }
-        const std::string code = "window.__whizEmit(" + nlohmann::json(event).dump() + "," + data.dump() + ");";
+        const std::string code = "window.__watyEmit(" + nlohmann::json(event).dump() + "," + data.dump() + ");";
         impl.view->execute(code);
     }
 
@@ -486,7 +486,7 @@ namespace whiz::detail
             return;
         }
 
-        const std::string channel = req.value("__whiz", "");
+        const std::string channel = req.value("__waty", "");
         if (channel == "ipc")
         {
             handle_ipc_request(impl, req);
@@ -546,7 +546,7 @@ namespace whiz::detail
         {
             impl.view->inject({.code = build_js_script(impl), .run_at = saucer::script::time::creation, .clearable = false});
             impl.view->on<saucer::webview::event::message>({{.func = [impl_ptr = &impl](std::string_view message) -> saucer::status {
-                if (message.find("\"__whiz\"") != std::string_view::npos)
+                if (message.find("\"__waty\"") != std::string_view::npos)
                 {
                     handle_js_message(*impl_ptr, message);
                     return saucer::status::handled;
@@ -555,9 +555,9 @@ namespace whiz::detail
             }, .clearable = false}});
         }
     }
-} // namespace whiz::detail
+} // namespace waty::detail
 
-namespace whiz
+namespace waty
 {
     Subscription WebWindow::ipcHandle(std::string_view event,
                                       std::function<std::future<nlohmann::json>(const nlohmann::json &)> callback)
@@ -602,9 +602,9 @@ namespace whiz
         if (!m_impl->view || m_impl->closed)
         {
             // 目标窗口已关闭：静默丢弃并记录警告（文档 7.1.4）
-            detail::log_message("warn", "whiz: emit 到已关闭窗口，消息丢弃");
+            detail::log_message("warn", "waty: emit 到已关闭窗口，消息丢弃");
             return;
         }
         detail::emit_to_js(*m_impl, event, data);
     }
-} // namespace whiz
+} // namespace waty

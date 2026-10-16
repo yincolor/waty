@@ -1,7 +1,7 @@
-// whiz TypeScript 全局声明（对应文档第 10 章）。
+// waty TypeScript 全局声明（对应文档第 10 章）。
 declare global {
     interface Window {
-        whiz: {
+        waty: {
             ipc?: {
                 invoke(event: string, ...args: any[]): Promise<any>;
 
