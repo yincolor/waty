@@ -441,13 +441,20 @@ namespace waty::detail
             }
 
             MessageBoxOptions options;
-            options.title = str_field(o, "title");
-            options.message = str_field(o, "message");
-            options.detail = str_field(o, "detail");
+            // MessageBoxOptions 的字符串字段是 string_view；必须先保存到本地 std::string，
+            // 否则 str_field() 返回的临时字符串会在赋值后立即销毁，导致 string_view 悬空，
+            // GTK/Pango 收到非法 UTF-8（中文尤其明显）。
+            const std::string title = str_field(o, "title");
+            const std::string message = str_field(o, "message");
+            const std::string detail = str_field(o, "detail");
+            const std::string checkbox_label = str_field(o, "checkboxLabel");
+            options.title = title;
+            options.message = message;
+            options.detail = detail;
             options.type = message_type;
             options.defaultButtonIndex = o.value("defaultButtonIndex", 0);
             options.cancelButtonIndex = o.value("cancelButtonIndex", -1);
-            options.checkboxLabel = str_field(o, "checkboxLabel");
+            options.checkboxLabel = checkbox_label;
             options.checkboxChecked = o.value("checkboxChecked", false);
             options.modal = o.value("modal", true);
             for (const auto &b : o["buttons"])
