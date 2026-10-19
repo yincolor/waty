@@ -35,6 +35,20 @@ endif()
 FetchContent_MakeAvailable(saucer nlohmann_json)
 
 # ---------------------------------------------------------------------------
+# WebKitGTK 2.54 兼容
+# ---------------------------------------------------------------------------
+# WebKitGTK 2.54 起 <webkit/webkit.h> 把 WebKitPointerLockPermissionRequest.h
+# 包在 `#if defined(ENABLE_POINTER_LOCK) && ENABLE_POINTER_LOCK` 中，但 pkg-config
+# 不会导出该构建宏，导致 saucer 8.0.5 引用
+# WEBKIT_IS_POINTER_LOCK_PERMISSION_REQUEST 时编译失败。
+# GTK 端口默认启用 pointer lock 且库导出对应符号，因此仅为 saucer 目标补上该宏。
+# 对旧版 WebKit（无条件包含该头文件）及修复后的版本（324124@main）均为无害 no-op。
+# 参考：https://bugs.webkit.org/show_bug.cgi?id=328048
+if(UNIX AND NOT APPLE)
+    target_compile_definitions(saucer PRIVATE ENABLE_POINTER_LOCK=1)
+endif()
+
+# ---------------------------------------------------------------------------
 # waty 库
 # ---------------------------------------------------------------------------
 
