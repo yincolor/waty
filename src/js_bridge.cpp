@@ -190,6 +190,34 @@ namespace waty::detail
         };
     }
 
+    if (@@SQLITE3@@) {
+        window.waty.sqlite3 = {
+            openDatabase: (dbName, version) => {
+                if (typeof dbName !== "string" || !/^[A-Za-z0-9_]{1,64}$/.test(dbName)) {
+                    return Promise.reject({
+                        name: "WatySqlite3Error",
+                        code: "SQLITE3_INVALID_ARGUMENT",
+                        message: "dbName must match /^[A-Za-z0-9_]{1,64}$/"
+                    });
+                }
+                if (typeof version !== "string" || !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(version)) {
+                    return Promise.reject({
+                        name: "WatySqlite3Error",
+                        code: "SQLITE3_INVALID_ARGUMENT",
+                        message: "version must match /^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$/"
+                    });
+                }
+                return request("sqlite3", "open", { dbName, version }).then((dbId) => ({
+                    dbId,
+                    execute: (sql, params) => request("sqlite3", "execute", { dbId, sql, params: params || {} }),
+                    query: (sql, params) => request("sqlite3", "query", { dbId, sql, params: params || {} }),
+                    transaction: (statements) => request("sqlite3", "transaction", { dbId, statements }),
+                    close: () => request("sqlite3", "close", { dbId })
+                }));
+            }
+        };
+    }
+
     window.addEventListener("error", (e) => {
         window.saucer.internal.message(JSON.stringify({ __waty: "jserror", message: e.message, source: e.filename, lineno: e.lineno, colno: e.colno }));
     });
@@ -234,6 +262,7 @@ namespace waty::detail
             script = replace_all(script, "@@FS_READ@@", p.fs.read ? "true" : "false");
             script = replace_all(script, "@@FS_WRITE@@", p.fs.write ? "true" : "false");
             script = replace_all(script, "@@DIALOG@@", p.dialog ? "true" : "false");
+            script = replace_all(script, "@@SQLITE3@@", p.sqlite3 ? "true" : "false");
             script = replace_all(script, "@@LOG@@", p.log ? "true" : "false");
             return script;
         }
@@ -517,6 +546,10 @@ namespace waty::detail
         else if (channel == "dialog")
         {
             handle_dialog_request(impl, req);
+        }
+        else if (channel == "sqlite3")
+        {
+            handle_sqlite3_request(impl, req);
         }
         else if (channel == "jserror")
         {

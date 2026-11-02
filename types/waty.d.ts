@@ -75,8 +75,25 @@ declare global {
                     modal?: boolean;
                 }): Promise<{ response: number; checkboxChecked: boolean }>;
             };
+            sqlite3?: {
+                openDatabase(dbName: string, version: string): Promise<WatyDatabase>;
+            };
         };
     }
+}
+
+interface WatyDatabase {
+    readonly dbId: string;
+    execute(sql: string, params?: Record<string, unknown>): Promise<{
+        changes: number | string;
+        lastInsertRowid: number | string;
+    }>;
+    query(sql: string, params?: Record<string, unknown>): Promise<{
+        rows: Array<Record<string, unknown>>;
+        columns: string[];
+    }>;
+    transaction(statements: Array<string | { sql: string; params?: Record<string, unknown> }>): Promise<{ ok: true }>;
+    close(): Promise<{ ok: true }>;
 }
 
 interface Stats {

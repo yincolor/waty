@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(waty LANGUAGES CXX VERSION 3.4.2)
+project(waty LANGUAGES CXX VERSION 3.5.0)
 
 include(FetchContent)
 
@@ -28,11 +28,22 @@ FetchContent_Declare(saucer
 
 # saucer-embed v1.1.1 在 CMake < 3.31 上使用了尚未定义的 CMP0174 策略，
 # 这里通过 CMAKE_PROJECT_INCLUDE 自动加保护（仅影响旧版 CMake）。
+
+# SQLite（sjinks/sqlite3-cmake，v3.49.1）
+# 注意：该包默认 sqlite3_ENABLE_THREADSAFE=OFF → 注入 SQLITE_THREADSAFE=0。
+# waty 会在“桥接线程打开 / 工作线程执行 / 任意线程关闭”之间传递连接，
+# 因此必须显式开启线程安全（SQLITE_THREADSAFE=1，serialized）。
+set(sqlite3_ENABLE_THREADSAFE ON CACHE BOOL "" FORCE)
+FetchContent_Declare(sqlite3
+    URL https://github.com/sjinks/sqlite3-cmake/archive/42e4aad2da70e5be84349915882a117742b042c2.tar.gz
+    URL_HASH SHA256=3e6adbec688e85b10500d7303a05edd415b622415cea48a7538fd99ff4d9bbe0
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
 if(CMAKE_VERSION VERSION_LESS 3.31)
     set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/saucer_cmp0174_compat.cmake")
 endif()
 
-FetchContent_MakeAvailable(saucer nlohmann_json)
+FetchContent_MakeAvailable(saucer nlohmann_json sqlite3)
 
 # ---------------------------------------------------------------------------
 # WebKitGTK 2.54 兼容
@@ -59,7 +70,11 @@ add_library(waty STATIC
     src/web_window.cpp
     src/js_bridge.cpp
     src/fs_bridge.cpp
+    src/base64.cpp
     src/dialog_bridge.cpp
+    src/sqlite3_database.cpp
+    src/sqlite3_service.cpp
+    src/sqlite3_bridge.cpp
 )
 add_library(waty::waty ALIAS waty)
 
@@ -74,6 +89,7 @@ target_include_directories(waty PUBLIC
 target_link_libraries(waty
     PUBLIC nlohmann_json::nlohmann_json
     PRIVATE saucer::saucer
+            SQLite::SQLite3
 )
 
 # dialog_bridge.cpp 在 Linux 上直接使用 GTK4 原生对话框 API（文档 8.5.3），
@@ -84,4 +100,22 @@ if(UNIX AND NOT APPLE)
     pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET libadwaita-1)
     pkg_check_modules(WEBKITGTK REQUIRED IMPORTED_TARGET webkitgtk-6.0)
     target_link_libraries(waty PRIVATE PkgConfig::GTK4 PkgConfig::LIBADWAITA PkgConfig::WEBKITGTK)
+endif()
+
+# ---------------------------------------------------------------------------
+# 单测（默认关闭；不依赖 WebView，仅链接 sqlite3）
+# ---------------------------------------------------------------------------
+option(WATY_BUILD_TESTS "Build waty unit tests" OFF)
+if(WATY_BUILD_TESTS)
+    enable_testing()
+    add_executable(waty_sqlite3_tests
+        tests/sqlite3_tests.cpp
+        src/base64.cpp
+        src/sqlite3_database.cpp
+        src/sqlite3_service.cpp
+    )
+    target_compile_features(waty_sqlite3_tests PRIVATE cxx_std_23)
+    target_include_directories(waty_sqlite3_tests PRIVATE src)
+    target_link_libraries(waty_sqlite3_tests PRIVATE SQLite::SQLite3 nlohmann_json::nlohmann_json)
+    add_test(NAME sqlite3 COMMAND waty_sqlite3_tests)
 endif()

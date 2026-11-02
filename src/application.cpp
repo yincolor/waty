@@ -2,6 +2,8 @@
 
 #include "detail.hpp"
 
+#include "sqlite3_service.hpp"
+
 #include <saucer/app.hpp>
 
 #include <nlohmann/json.hpp>
@@ -209,6 +211,15 @@ namespace waty
             m_impl->webview_storage_path = std::string(*options.webviewStoragePath);
         }
 
+        // Sqlite3 上限校验（见设计文档 §4.5 / §7.1）
+        if (options.sqlite3.maxOpenDatabases < 1 || options.sqlite3.maxOpenDatabases > 1024)
+        {
+            throw std::invalid_argument("waty: ApplicationOptions.sqlite3.maxOpenDatabases 必须在 1..1024 之间");
+        }
+        // 只保存数据目录与上限：目录与 .db 在首次 open 时才落地。
+        m_impl->sqlite3 = std::make_shared<detail::Sqlite3Service>(getPath(SysPath::AppData),
+                                                                  options.sqlite3.maxOpenDatabases);
+
         const std::string id = m_impl->app_name;
 
         // quit_on_last_window_closed 设为 false：由 waty 自行处理 window-all-closed 默认行为，
@@ -286,6 +297,7 @@ namespace waty
 
         const WindowId id = m_impl->next_id++;
         std::shared_ptr<WebWindow> window(new WebWindow(this, id, options));
+        window->m_impl->sqlite3 = m_impl->sqlite3; // shared_ptr 拷贝，窗口与 App 共享同一 Service
 
         {
             std::lock_guard<std::mutex> lock(m_impl->windows_mutex);

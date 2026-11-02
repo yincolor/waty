@@ -1,4 +1,4 @@
-# Waty 项目文档 v3.4.2
+# Waty 项目文档 v3.5.0
 
 > 基于 Saucer + C++23 + CMake 的轻量级桌面应用框架，提供类似 Electron 的开发体验。
 
@@ -55,6 +55,7 @@
 - CMake 3.20+（Saucer v8.x 实际最低要求）
 - Saucer v8.x（通过 FetchContent 自动获取）
 - nlohmann/json（通过 FetchContent 自动获取）
+- SQLite 3.49.1：通过 `sjinks/sqlite3-cmake` 自动获取，编译期还会从 `sqlite.org` 下载 amalgamation；CI 需可访问 `github.com` 与 `sqlite.org`。Waty 强制 `sqlite3_ENABLE_THREADSAFE=ON`（`SQLITE_THREADSAFE=1`）。
 
 ### 3.1 平台依赖
 
@@ -89,7 +90,7 @@ include(FetchContent)
 
 FetchContent_Declare(waty
     GIT_REPOSITORY https://github.com/yourname/waty.git
-    GIT_TAG v3.4.2)          # 固定版本 tag，避免 main 分支不稳定
+    GIT_TAG v3.5.0)          # 固定版本 tag，避免 main 分支不稳定
 FetchContent_MakeAvailable(waty)
 
 add_executable(my_app main.cpp)
@@ -139,6 +140,8 @@ int main() {
     appOpts.permissions.dialog = true;         // 启用 JS 原生对话框
     appOpts.permissions.fs.read = true;        // 启用 JS 文件读取
     appOpts.permissions.fs.write = false;      // 默认关闭写
+    appOpts.permissions.sqlite3 = true;        // 启用 window.waty.sqlite3
+    appOpts.sqlite3.maxOpenDatabases = 64;     // 可选，默认 64，范围 1..1024
     appOpts.logFile = "/home/user/data/app.log"; // 建议绝对路径，可用 getPath 拼接
 
     waty::Application app(appOpts);
@@ -290,11 +293,23 @@ struct PermissionOptions {
     bool devtools = false;     // 是否允许打开 DevTools
     bool log = false;          // 是否转发 JS console 到 C++ 日志
     bool dialog = false;       // 是否启用对话框模块（open / save / message）
+    bool sqlite3 = false;      // 是否启用 window.waty.sqlite3
     FsPermissionOptions fs;    // 文件系统权限
 };
 ```
 
-> `dialog` 权限默认关闭，与 `os`、`window` 的权限模型保持一致。
+> `dialog` / `sqlite3` 权限默认关闭，与 `os`、`window` 的权限模型保持一致。
+
+### 6.2.1 Sqlite3Options
+
+```cpp
+struct Sqlite3Options {
+    // 同时打开的数据库上限（1..1024）。超出范围时 Application 构造函数抛出 std::invalid_argument。
+    std::size_t maxOpenDatabases = 64;
+};
+```
+
+> Sqlite3 是否可用由 `PermissionOptions::sqlite3` 决定；`Sqlite3Options` 只控制资源上限。
 
 ### 6.3 ApplicationOptions
 
@@ -311,6 +326,7 @@ struct ApplicationOptions {
     // macOS: ~/Library/Application Support/<organizationName>/<appName>/WebView。
     std::optional<std::string_view> webviewStoragePath;
 
+    Sqlite3Options sqlite3;                   // Sqlite3 资源上限（是否启用见 permissions.sqlite3）
     PermissionOptions permissions;            // JS 权限配置
 };
 ```
@@ -509,6 +525,7 @@ Waty 的线程模型与 Saucer 一致，核心规则只有三条：
 | `ww->ipcHandle` 回调 | 线程池 | 允许耗时操作 |
 | `ww->emit` | 任意线程 | 内部投递到 UI 线程 |
 | `ww->showOpenDialog` / `showSaveDialog` / `showMessageBox` | UI 线程 | 操作原生对话框 |
+| JS `window.waty.sqlite3.*` 请求 | 桥接线程 + 每库工作线程 | 不阻塞 UI；同库串行、不同库并行 |
 | `Subscription::unsubscribe` | 任意线程 | 加锁，安全 |
 
 #### 7.1.4 详细规则
@@ -522,6 +539,7 @@ Waty 的线程模型与 Saucer 一致，核心规则只有三条：
 - **窗口事件监听回调（`windowEventHandle`）在 UI 线程执行**。
 - **应用事件监听回调在 UI 线程执行**。
 - **事件循环任务（`onEventLoopTick`）在 UI 线程执行，每轮事件循环触发一次。** 回调中应避免耗时操作，否则会阻塞 UI 与 WebView。需要执行耗时逻辑时，应投递到线程池（如 `std::async`），并通过 `emit` 回到 UI 线程更新界面。任务回调中**禁止**注册或取消 `onEventLoopTick` 任务，违反会被检测并触发断言失败，程序退出（详见 7.3.3）。
+- **Sqlite3 请求不在 UI 线程执行**：JS 请求先进入内部桥接线程，再投递到对应数据库的工作线程（每个数据库一个）。同一数据库上的 `execute` / `query` / `transaction` 严格按调用顺序串行，不同数据库之间互不阻塞；响应通过 UI 线程 resolve JS Promise。Waty 内部保证 `SQLITE_THREADSAFE=1`，但使用者的 SQL 仍应避免长时间全表扫描阻塞该库上的后续操作。
 - **对话框方法（`showOpenDialog` / `showSaveDialog` / `showMessageBox`）必须在 UI 线程调用**，回调也在 UI 线程执行。原生对话框 API 依赖 UI 线程的消息循环，跨线程调用会被拒绝。
 - **窗口只读方法**（`getSize` / `getPosition` / `title` / `isMaximized` / `isMinimized` / `isVisible` / `id`）内部缓存窗口状态并加锁，任意线程可安全读取。缓存在窗口事件（`resize` / `move` / `maximize` / `minimize` / `show` / `hide` 等）触发时更新，因此刚变更后立即读取可能存在极小延迟。写方法（`setSize` / `setPosition` / `maximize` / `minimize` / `close` / `show` / `hide` 等）必须在 UI 线程调用。
 - **`Subscription::unsubscribe` 线程安全**。若回调正在执行，`unsubscribe` 不会中断当前回调；当前回调执行完成后不再触发后续回调。
@@ -942,6 +960,17 @@ parent->windowEventHandle("sub-window-close", [](waty::Event&, const nlohmann::j
 
 所有功能挂在全局对象 `window.waty` 下，且仅在 C++ 侧配置了对应权限时才可用。未配置权限的模块在 JS 环境中为 `undefined`。
 
+模块与权限对照：
+
+| JS 模块 | 权限 | 章节 |
+|---|---|---|
+| `window.waty.ipc` | `permissions.ipc`（默认 `true`） | 8.1 |
+| `window.waty.os` | `permissions.os` | 8.2 |
+| `window.waty.fs` | `permissions.fs.read` / `.write` | 8.3 |
+| `window.waty.window` | `permissions.window` / `.devtools` | 8.4 |
+| `window.waty.dialog` | `permissions.dialog` | 8.5 |
+| `window.waty.sqlite3` | `permissions.sqlite3` | 8.6 |
+
 若 `permissions.ipc = false`，则 `window.waty.ipc` 未定义，访问结果为 `undefined`。
 
 ### 8.1 IPC
@@ -1298,6 +1327,110 @@ console.log(msgResult.checkboxChecked);  // 复选框状态
 
 > 正常取消（用户关闭对话框或点击取消按钮）不会 reject，而是通过返回值表达：`showOpenDialog` / `showSaveDialog` 返回 `{ canceled: true, ... }`；`showMessageBox` 返回的 `response` 字段按以下规则确定——通过标题栏或系统关闭方式关闭、且未设置 `cancelButtonIndex` 时为 `-1`；按 Esc 键时，设置了 `cancelButtonIndex` 则返回该索引，未设置则返回 `-1`；点击取消按钮时返回 `cancelButtonIndex`。
 
+### 8.6 Sqlite3（需 `permissions.sqlite3 = true`）
+
+`window.waty.sqlite3` 提供多数据库 SQLite 访问。每个数据库使用独立连接与独立工作线程，库与库之间互不阻塞；同一数据库上的操作严格串行执行。数据库文件位于 `<AppData>/sqlite3/db/<dbName>@<version>.db`（`dbName` 统一转小写）。
+
+**连接全应用共享，句柄按窗口记账**：同一 `(dbName, version)` 只会打开一条连接，所有窗口共用；但每个窗口各自持有一个逻辑句柄。窗口 A `close()` 只注销 A 的句柄（A 后续操作得到 `SQLITE3_NOT_OPEN`），其他仍持有该库的窗口不受影响；最后一个窗口 `close` 或窗口关闭/销毁时才真正关闭连接。未打开过该库的窗口即使拿到 `dbId` 也不能直接操作。
+
+#### 8.6.1 openDatabase
+
+```ts
+waty.sqlite3.openDatabase(dbName: string, version: string): Promise<WatyDatabase>
+```
+
+- `dbName`：`/^[A-Za-z0-9_]{1,64}$/`，大小写不敏感。
+- `version`：`/^\d{1,3}\.\d{1,3}\.\d{1,3}$/`（如 `0.0.1`）。不同 version 是**独立数据库**，本期不做 schema 迁移。
+- 幂等：同一 `(dbName, version)` 重复调用返回同一 `dbId`；并发调用只会打开一次。
+- `dbId` 形如 `<dbName>@<version>`（`dbName` 已转小写），后续 `execute` / `query` / `transaction` / `close` 均使用它。
+- 窗口级句柄：每个窗口 `openDatabase` 成功即登记为持有者；同一窗口重复 `openDatabase` 幂等（不累加），一次 `close()` 即注销该窗口。
+- 窗口关闭/销毁时框架自动注销该窗口的全部句柄；某个库没有其他持有者时连接才真正关闭（数据库文件保留）。
+- 打开数量受 `ApplicationOptions.sqlite3.maxOpenDatabases` 限制（默认 64，范围 1..1024）；超出时返回 `SQLITE3_TOO_MANY_OPEN`。
+- 这是纯 JS API：Waty 不暴露公共 C++ Sqlite3 接口，C++ 侧实现位于 `waty::detail`，不作为 ABI/API 承诺。
+
+#### 8.6.2 WatyDatabase
+
+`openDatabase()` 返回对象字面量，`dbId` 为只读字段。
+
+| 方法 | 说明 | 返回 |
+|---|---|---|
+| `execute(sql, params?)` | 执行**单条** DDL/DML；不自动包事务 | `{ changes, lastInsertRowid }`（超出 `±(2^53-1)` 时为 string） |
+| `query(sql, params?)` | 执行**单条**查询，全量返回；大结果集请用 `LIMIT/OFFSET` | `{ rows: object[], columns: string[] }` |
+| `transaction(statements)` | `BEGIN IMMEDIATE` 原子执行一组语句，失败整体 `ROLLBACK` | `{ ok: true }` |
+| `close()` | 只注销**当前窗口**的句柄；已入队操作执行完后本窗口失效；其他持有窗口不受影响；最后一个持有者关闭时才真正关闭连接 | `{ ok: true }` |
+
+`statements` 每项为 SQL 字符串或 `{ sql, params? }`：
+
+```js
+await db.transaction([
+    "CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT)",
+    { sql: "INSERT INTO t(name) VALUES (:name)", params: { name: "hello" } }
+]);
+```
+
+> `execute` / `query` 只接受单条语句；分号分隔的多条语句会以 `SQLITE3_MULTI_STATEMENT` 拒绝。`query` 结果中同名列表列会互相覆盖，需要区分时使用 `AS` 别名。
+
+#### 8.6.3 参数与类型映射
+
+`params` 仅支持**对象**（命名参数），键名对应 SQL 中的 `:name` / `@name` / `$name`（三种前缀都会尝试）；SQL 中不存在的键被忽略，存在但未提供的参数为 `NULL`。
+
+| JS 值 | 绑定方式 |
+|---|---|
+| `null` | `NULL` |
+| `boolean` | `INTEGER`（`true` → 1） |
+| 整数 | `int64`；超出 int64 范围 → `SQLITE3_INVALID_ARGUMENT` |
+| 其它 `Number` | `REAL` |
+| `string` | `TEXT`（UTF-8） |
+| 数组 / 对象 | `JSON.stringify` 后的 `TEXT` |
+
+查询结果：`INTEGER` → `number`（超出 `±(2^53-1)` 时为 `string`）；`REAL` → `number`；`TEXT` → `string`；`NULL` → `null`；`BLOB` → base64 `string`。入参暂不支持二进制。
+
+#### 8.6.4 错误格式
+
+```js
+{ name: "WatySqlite3Error", code: string, message: string }
+```
+
+| 错误码 | 触发条件 |
+|---|---|
+| `SQLITE3_INVALID_ARGUMENT` | 参数非法（JS 与 C++ 双层校验） |
+| `SQLITE3_PERMISSION_DENIED` | 权限被关闭（防御路径） |
+| `SQLITE3_UNAVAILABLE` | 服务未初始化 |
+| `SQLITE3_TOO_MANY_OPEN` | 打开数达到 `maxOpenDatabases` |
+| `SQLITE3_OPEN_FAILED` | 目录创建或 `sqlite3_open_v2` 失败 |
+| `SQLITE3_NOT_OPEN` | `dbId` 未打开或已关闭 |
+| `SQLITE3_EMPTY_SQL` | 空 SQL（或仅含注释） |
+| `SQLITE3_MULTI_STATEMENT` | 传入了多条语句 |
+| `SQLITE3_EXEC_ERROR` | prepare/step 失败（语法、约束、锁等） |
+| `SQLITE3_CLOSING` | 数据库正在关闭 |
+| `SQLITE3_INTERNAL` | 未分类异常 |
+
+#### 8.6.5 示例
+
+```js
+const db = await window.waty.sqlite3.openDatabase("movie", "0.0.1");
+
+await db.execute("CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT)");
+const inserted = await db.execute("INSERT INTO t(name) VALUES (:name)", { name: "hello" });
+const { rows, columns } = await db.query("SELECT id, name FROM t WHERE name = :name", { name: "hello" });
+
+await db.transaction([
+    { sql: "INSERT INTO t(name) VALUES (:name)", params: { name: "a" } },
+    { sql: "INSERT INTO t(name) VALUES (:name)", params: { name: "b" } }
+]);
+
+await db.close();
+```
+
+#### 8.6.6 安全说明
+
+- 默认关闭；未开启 `permissions.sqlite3` 时 `window.waty.sqlite3 === undefined`，C++ 桥仍有二次权限校验。
+- 窗口级注销由框架保证：窗口 `close()` 只影响该窗口；窗口关闭/销毁会自动 `release_all`，避免已关闭窗口的句柄长期占用连接与打开额度。
+- `dbName` 经双层校验后只含 `[a-z0-9_@.]`，目录固定为 `<AppData>/sqlite3/db`，无路径穿越。
+- 值一律通过 `sqlite3_bind_*` 绑定；SQL 文本由调用方负责（与 fs/dialog 同级别的信任模型）。
+- 默认 `journal_mode=WAL`、`busy_timeout=5000`；`foreign_keys` 保持 SQLite 默认（关闭），需要时由调用方执行 `PRAGMA foreign_keys=ON`。
+- 单个响应建议不超过 16 MB（WebView 消息通道为字符串序列化）。
+
 ---
 
 ## 9. IPC 异步处理与数据转换
@@ -1367,6 +1500,21 @@ window.waty.ipc.on("server-message", (data) => {
     console.log(data.text);
 });
 ```
+
+### 9.5 Sqlite3 通道与 IPC 的关系
+
+`window.waty.sqlite3` **不是** `ipcHandle` 的封装，而是 Waty 内置的独立 message 通道（channel = `sqlite3`）：
+
+| 维度 | `ipc.invoke` / `ipcHandle` | `window.waty.sqlite3` |
+|---|---|---|
+| 注册 | 使用者通过 `ww->ipcHandle(event, cb)` 注册 | 内置，无需注册 |
+| 执行线程 | 线程池 | 桥接线程 + 每个数据库的独立工作线程 |
+| 数据格式 | 任意 JSON | SQL 字符串 + 命名参数对象 |
+| 错误 | `WatyIpcError`（`IPC_*`） | `WatySqlite3Error`（`SQLITE3_*`） |
+| 权限 | `permissions.ipc`（默认开启） | `permissions.sqlite3`（默认关闭） |
+| 超时 | 可由 `ipc.createInvoker` 配置 | 不提供超时；长查询会持续占用该库工作线程 |
+
+二者共用底层 `window.saucer.internal.message` 与 `window.__watyPending` 请求表，但 channel 与错误模型相互独立。不要把 Sqlite3 请求转发给 `ipcHandle`，也不要期望 `sqlite3` 请求触发 IPC 事件。
 
 ---
 
@@ -1449,8 +1597,25 @@ declare global {
                     modal?: boolean;
                 }): Promise<{ response: number; checkboxChecked: boolean }>;
             };
+            sqlite3?: {
+                openDatabase(dbName: string, version: string): Promise<WatyDatabase>;
+            };
         };
     }
+}
+
+interface WatyDatabase {
+    readonly dbId: string;
+    execute(sql: string, params?: Record<string, unknown>): Promise<{
+        changes: number | string;
+        lastInsertRowid: number | string;
+    }>;
+    query(sql: string, params?: Record<string, unknown>): Promise<{
+        rows: Array<Record<string, unknown>>;
+        columns: string[];
+    }>;
+    transaction(statements: Array<string | { sql: string; params?: Record<string, unknown> }>): Promise<{ ok: true }>;
+    close(): Promise<{ ok: true }>;
 }
 
 interface Stats {
@@ -1517,6 +1682,7 @@ export {};
 | `dialog.showOpenDialog` | `window.waty.dialog.showOpenDialog` | 基于 `saucer/desktop` File-Picker，需 `permissions.dialog` |
 | `dialog.showSaveDialog` | `window.waty.dialog.showSaveDialog` | 同上 |
 | `dialog.showMessageBox` | `window.waty.dialog.showMessageBox` | 基于 Saucer Native API，平台原生实现 |
+| `better-sqlite3` / 原生 SQLite 模块 | `window.waty.sqlite3` | 内置多数据库访问，无需原生模块编译；需 `permissions.sqlite3` |
 | 单实例锁 | `app.requestSingleInstanceLock()` | 直接对应，返回 false 应立即 `app.quit()` |
 | `app.getPath('userData')` | `getPath(SysPath::Config)` / `os.getPath("config")` | Linux 下均指向 `~/.config/<organizationName>/<appName>` 风格路径（默认 `waty`） |
 | `app.getPath('exe')` | `getPath(SysPath::Executable)` / `os.getPath("executable")` | 返回可执行文件完整路径（含文件名） |
@@ -1546,15 +1712,23 @@ waty/
 ├── src/
 │   ├── application.cpp
 │   ├── web_window.cpp
+│   ├── detail.hpp              # Impl 定义与内部函数声明
 │   ├── js_bridge.cpp
 │   ├── fs_bridge.cpp
-│   └── dialog_bridge.cpp       # 对话框实现
+│   ├── base64.cpp / base64.hpp # base64（fs 与 BLOB 列共用）
+│   ├── dialog_bridge.cpp       # 对话框实现
+│   ├── sqlite3_database.cpp/.hpp # 单库连接 + 工作线程 + 串行队列
+│   ├── sqlite3_statement.hpp   # statement RAII / 参数绑定 / 列值转换
+│   ├── sqlite3_service.cpp/.hpp  # 库路由、打开/关闭、execute/query/transaction
+│   └── sqlite3_bridge.cpp      # message 通道分发与错误转换
 ├── web/  # 默认示例前端，使用者需在CMake中用waty_embed指定前端根目录
 │   └── index.html
 ├── types/
 │   └── waty.d.ts  # TypeScript 全局声明
-└── docs/
-    └── README.md
+├── tests/
+│   └── sqlite3_tests.cpp  # Sqlite3 单测（-DWATY_BUILD_TESTS=ON）
+├── README.md
+└── DESIGN.md
 ```
 
 ---
@@ -1571,6 +1745,7 @@ waty/
 - 常用桌面能力：文件系统、系统信息、应用路径、日志、崩溃捕获（均需显式授权，IPC 除外）
 - 原生文件选择对话框（打开 / 保存），基于 `saucer/desktop` File-Picker
 - 原生消息框对话框，基于 Saucer Native API
+- 多数据库 SQLite 访问（`window.waty.sqlite3`，需 `permissions.sqlite3`）
 - 窗口控制、单实例锁
 - 应用退出默认行为的事件级控制（`window-all-closed` 可 `preventDefault`）
 - 默认将 WebView 运行时数据保存到符合 XDG 规范的用户数据目录
@@ -1589,6 +1764,11 @@ waty/
 - 不自动迁移旧 `.saucer` 目录
 - 不自动清理 WebView 缓存、Cookie、LocalStorage
 - 不保证 macOS 下 WKWebView 数据完全落在指定 `storage_path`
+- SQLite ORM / 查询构建器 / 自动 schema 迁移（`version` 只用于隔离数据库文件，不做迁移）
+- SQLite 同步 API（所有 JS 调用均为 Promise）
+- SQLite BLOB 入参（查询结果支持 BLOB → base64，写入二进制请用 `fs.writeFile` 或后续扩展）
+- SQLite 自定义函数、虚拟表、扩展加载（依赖上游编译选项，且 `SQLITE_OMIT_LOAD_EXTENSION` 生效）
+- 跨进程共享同一数据库连接的协调（WAL 允许跨进程读写，但 Waty 不做应用级多进程管理）
 
 ---
 
@@ -1599,6 +1779,13 @@ waty/
 - `window.waty.window` 窗口控制默认关闭，需 `permissions.window = true`。
 - `window.waty.dialog` 默认关闭，需 `permissions.dialog = true`。文件选择对话框会将用户选择的完整文件系统路径暴露给 JS 环境。`showMessageBox` 不涉及文件系统路径，但仍是原生 UI 调用，受同一权限控制。
 - `showMessageBox` 通过 Saucer Native API 调用平台原生实现，不经过 WebView 渲染，因此不受 `loadURL` 安全策略的约束。
+- `window.waty.sqlite3` 默认关闭，需 `permissions.sqlite3 = true`。未开启时 `window.waty.sqlite3 === undefined`；C++ 桥仍有二次权限校验（`SQLITE3_PERMISSION_DENIED`），防止被注入的 JS 绕过。
+- SQLite 句柄按窗口注销：窗口 `close()` 只影响当前窗口，不会中断其他窗口；窗口关闭/销毁时框架自动 `release_all` 该窗口的句柄。最后一个持有者释放后连接才真正关闭，避免已关闭窗口长期占用文件句柄与打开额度。
+- SQLite 数据库文件固定落在 `<AppData>/sqlite3/db/<dbName>@<version>.db`。`dbName` 在 JS 与 C++ 两侧校验为 `[A-Za-z0-9_]{1,64}` 并统一小写，`version` 校验为 `x.y.z`，因此不存在路径穿越。
+- SQLite 参数一律通过 `sqlite3_bind_*` 绑定；**SQL 文本由调用方负责**（与 fs / dialog 同级的信任模型）。不要把不可信输入直接拼接进 SQL。
+- SQLite 打开数量受 `ApplicationOptions.sqlite3.maxOpenDatabases` 限制（默认 64），避免 JS 侧耗尽文件描述符；单个查询结果建议不超过 16 MB（message 通道为字符串序列化）。
+- SQLite 连接默认启用 WAL 与 `busy_timeout=5000`，但 `foreign_keys` 保持 SQLite 默认关闭；需要外键约束时由调用方显式 `PRAGMA foreign_keys=ON`，Waty 不代为修改全局语义。
+- SQLite 数据库文件可能包含业务敏感数据；Waty 不加密数据库文件，请依赖操作系统文件权限或自行使用 SQLCipher 等方案。
 - `DevTools` 默认关闭，生产环境请勿随意开启。权限关闭时，C++ 调用 `ww->openDevTools()` 会抛出异常、JS 调用 `window.waty.window.openDevTools()` 会 reject，不会被静默忽略。
 - 图标路径解析会同时尝试嵌入资源和可执行文件目录，找不到时使用系统默认图标并记录日志。
 - IPC 请求回调（`ipcHandle`）在线程池中执行，注意线程安全，不要直接操作 UI。
@@ -1641,3 +1828,15 @@ waty/
 - **变更** `SysPath::UserData` 重命名为 `SysPath::Config`：因其实现返回 `XDG_CONFIG_HOME` 目录，命名更准确。旧名保留为 deprecated 别名。
 - **变更** `SysPath::AppDir` 重命名为 `SysPath::Executable`：返回可执行文件完整路径（含文件名）。旧名保留为 deprecated 别名。
 - **文档** 同步更新 3、6.3、6.4、7.3.2、8.2、10、11、12、14、15 等章节。
+---
+
+## 附录 B：v3.5.0 变更摘要
+
+- **新增** `window.waty.sqlite3`：多数据库 SQLite 访问，需 `permissions.sqlite3 = true`（默认关闭）。
+- **新增** `PermissionOptions::sqlite3`、`Sqlite3Options`、`ApplicationOptions::sqlite3`（`maxOpenDatabases`，默认 64，范围 1..1024）。
+- **数据目录**：`<AppData>/sqlite3/db/<dbName>@<version>.db`；`dbName` 大小写不敏感，不同 `version` 为独立数据库。
+- **语义**：`execute` / `query` 仅接受单条语句（多语句 → `SQLITE3_MULTI_STATEMENT`）；多条语句请使用 `transaction`。
+- **依赖**：新增 `sjinks/sqlite3-cmake` v3.49.1（`SQLite::SQLite3`，`PRIVATE` 链接）；显式设置 `sqlite3_ENABLE_THREADSAFE=ON` 以保证 `SQLITE_THREADSAFE=1`。
+- **实现**：复用现有 message 桥（`sqlite3` channel），未引入 Saucer `expose`；C++ 实现全部位于 `waty::detail`，不新增公共 C++ API。
+- **测试**：新增 `-DWATY_BUILD_TESTS=ON`（默认关闭）与 `tests/sqlite3_tests.cpp`，覆盖参数校验、幂等、并发、事务、多库隔离与 `SQLITE_THREADSAFE`。
+- **文档**：同步更新 6.2 / 6.3 / 8.6 / 10 / 13 / 14。

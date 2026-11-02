@@ -1,6 +1,7 @@
 #include <waty/web_window.hpp>
 
 #include "detail.hpp"
+#include "sqlite3_service.hpp"
 
 #include <saucer/icon.hpp>
 #include <saucer/scheme.hpp>
@@ -17,6 +18,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -333,7 +335,15 @@ namespace waty
         m_impl->cached_size = {options.width, options.height};
     }
 
-    WebWindow::~WebWindow() = default;
+    WebWindow::~WebWindow()
+    {
+        // 窗口对象销毁：注销该窗口的全部 SQLite 句柄；若某个库已无其他窗口持有，
+        // 连接会在 release_all 内部排空队列后关闭。应用退出时此处是最后一道兜底。
+        if (m_impl && m_impl->sqlite3)
+        {
+            m_impl->sqlite3->release_all(m_impl->id);
+        }
+    }
 
     WindowId WebWindow::id() const
     {
@@ -690,6 +700,16 @@ namespace waty
             if (auto parent = m_impl->parent.lock())
             {
                 parent->m_impl->window_events.emit("sub-window-close", nlohmann::json{{"windowId", m_impl->id}});
+            }
+
+            // 窗口关闭：注销该窗口持有的 SQLite 句柄。
+            // 若这是最后一个使用者，release_all 会排空队列并 join 工作线程（可能耗时），
+            // 因此放到后台线程，避免阻塞 UI 线程。
+            if (m_impl->sqlite3)
+            {
+                auto service = m_impl->sqlite3;
+                const auto window = m_impl->id;
+                std::thread([service = std::move(service), window] { service->release_all(window); }).detach();
             }
 
             // 通知 Application 更新 window-all-closed

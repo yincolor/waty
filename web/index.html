@@ -20,6 +20,7 @@
         <button id="os">os.platform / os.homedir / getPath</button>
         <button id="fs">fs.stat(index.html)</button>
         <button id="win">window.getSize</button>
+        <button id="sqlite3">sqlite3 基本用例</button>
         <button id="emit">等待 C++ emit("server-ping")</button>
     </div>
 
@@ -49,6 +50,31 @@
         document.getElementById("win").onclick = async () => {
             const size = await window.waty.window.getSize();
             out("window.getSize: " + JSON.stringify(size));
+        };
+
+        document.getElementById("sqlite3").onclick = async () => {
+            if (!window.waty.sqlite3) {
+                out("sqlite3 未启用（permissions.sqlite3 = false）");
+                return;
+            }
+            try {
+                const db = await window.waty.sqlite3.openDatabase("demo", "0.0.1");
+                out("openDatabase: " + db.dbId);
+                await db.execute("CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, name TEXT)");
+                const inserted = await db.execute("INSERT INTO t(name) VALUES (:name)", { name: "hello" });
+                out("execute: " + JSON.stringify(inserted));
+                const result = await db.query("SELECT id, name FROM t ORDER BY id");
+                out("query: " + JSON.stringify(result));
+                await db.transaction([
+                    { sql: "INSERT INTO t(name) VALUES (:name)", params: { name: "a" } },
+                    { sql: "INSERT INTO t(name) VALUES (:name)", params: { name: "b" } }
+                ]);
+                out("transaction: ok");
+                await db.close();
+                out("close: ok");
+            } catch (e) {
+                out("sqlite3 错误: " + JSON.stringify(e));
+            }
         };
 
         document.getElementById("emit").onclick = () => {

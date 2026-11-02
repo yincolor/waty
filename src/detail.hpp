@@ -31,6 +31,8 @@
 
 namespace waty::detail
 {
+    class Sqlite3Service; // 前置声明（定义在 src/sqlite3_service.hpp，仅 src/ 内部使用）
+
     /// 事件发射器：回调签名 void(Event&, const nlohmann::json&)。
     /// 回调在 UI 线程执行；unsubscribe 线程安全；emit 返回是否有回调调用了 preventDefault。
     class EventEmitter
@@ -216,6 +218,9 @@ namespace waty
 
         // JS 桥是否已注入
         bool bridge_ready = false;
+
+        // Sqlite3 服务（由 Application 下发，窗口与 App 共享同一实例）
+        std::shared_ptr<detail::Sqlite3Service> sqlite3;
     };
 
     /// Application 内部实现。
@@ -260,6 +265,9 @@ namespace waty
 
         // 已打开窗口计数（用于 window-all-closed）
         std::atomic<std::size_t> open_windows{0};
+
+        // Sqlite3 服务（构造时创建；只保存路径与上限，不建目录/不起线程）
+        std::shared_ptr<detail::Sqlite3Service> sqlite3;
     };
 } // namespace waty
 
@@ -279,6 +287,7 @@ namespace waty::detail
     // fs_bridge.cpp / dialog_bridge.cpp 入口
     void handle_fs_request(WebWindow::Impl &impl, const nlohmann::json &request);
     void handle_dialog_request(WebWindow::Impl &impl, const nlohmann::json &request);
+    void handle_sqlite3_request(WebWindow::Impl &impl, const nlohmann::json &request);
 
     // web_window.cpp：图标路径解析（先查嵌入资源，再查可执行文件目录）
     std::string executable_path();

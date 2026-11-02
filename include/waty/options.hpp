@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,6 +18,13 @@ namespace waty
         bool write = false;
     };
 
+    /// Sqlite3 配置（是否启用由 PermissionOptions::sqlite3 决定）
+    struct Sqlite3Options
+    {
+        // 同时打开的数据库上限（1..1024）。
+        std::size_t maxOpenDatabases = 64;
+    };
+
     /// JS 权限配置（见文档 6.2）
     struct PermissionOptions
     {
@@ -26,6 +34,7 @@ namespace waty
         bool devtools = false;  // 是否允许打开 DevTools
         bool log      = false;  // 是否转发 JS console 到 C++ 日志
         bool dialog   = false;  // 是否启用对话框模块
+        bool sqlite3  = false;  // 是否启用 window.waty.sqlite3
 
         FsPermissionOptions fs;
     };
@@ -44,6 +53,8 @@ namespace waty
         // Windows: %LOCALAPPDATA%\<organizationName>\<appName>\WebView2。
         // macOS: ~/Library/Application Support/<organizationName>/<appName>/WebView。
         std::optional<std::string_view> webviewStoragePath;
+
+        Sqlite3Options sqlite3;
 
         PermissionOptions permissions;
     };

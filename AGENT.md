@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-waty 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架，目标是提供类似 Electron 的开发体验：用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。项目当前版本为 `v3.4.2`，采用 **AGPL-3.0** 许可证。
+waty 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架，目标是提供类似 Electron 的开发体验：用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。项目当前版本为 `v3.5.0`，采用 **AGPL-3.0** 许可证。
 
 ## 技术栈
 
@@ -144,7 +144,7 @@ include(FetchContent)
 FetchContent_Declare(
     waty
     GIT_REPOSITORY https://github.com/yincolor/waty.git
-    GIT_TAG v3.4.2
+    GIT_TAG v3.5.0
 )
 FetchContent_MakeAvailable(waty)
 
