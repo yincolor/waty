@@ -78,6 +78,18 @@ declare global {
             sqlite3?: {
                 openDatabase(dbName: string, version: string): Promise<WatyDatabase>;
             };
+            notify?: {
+                send(options: {
+                    title: string;
+                    body?: string;
+                    icon?: string;
+                    actions?: Array<{ id: string; label: string }>;
+                    timeout?: number;
+                    tag?: string;
+                }): Promise<{ ok: boolean }>;
+                hasPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
+                requestPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
+            };
         };
     }
 }

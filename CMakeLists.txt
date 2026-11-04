@@ -75,6 +75,14 @@ add_library(waty STATIC
     src/sqlite3_database.cpp
     src/sqlite3_service.cpp
     src/sqlite3_bridge.cpp
+    # notify 内部模块
+    src/notify_bridge.cpp
+    src/notify/api.cpp
+    src/notify/event_loop.cpp
+    # tray 内部模块（公共部分）
+    src/tray/common/tray_context.cpp
+    src/tray/common/tray_icon.cpp
+    src/tray/common/menu.cpp
 )
 add_library(waty::waty ALIAS waty)
 
@@ -94,12 +102,45 @@ target_link_libraries(waty
 
 # dialog_bridge.cpp 在 Linux 上直接使用 GTK4 原生对话框 API（文档 8.5.3），
 # 并通过 saucer 的 stable_natives 获取 GtkWindow*，需要相关头文件。
-if(UNIX AND NOT APPLE)
+#
+# notify / tray 内部模块按平台追加后端源文件与系统依赖：
+#   - notify:  Windows WinRT Toast / macOS UserNotifications / Linux D-Bus
+#   - tray:    Windows Shell_NotifyIcon(占位) / macOS NSStatusItem(占位) / Linux SNI D-Bus
+if(WIN32)
+    target_sources(waty PRIVATE
+        src/notify/backend_windows.cpp
+        src/tray/windows/tray_icon_win.cpp
+        src/tray/windows/tray_context_win.cpp
+    )
+    target_link_libraries(waty PRIVATE windowsapp shell32 user32)
+elseif(APPLE)
+    enable_language(OBJCXX)
+    target_sources(waty PRIVATE
+        src/notify/backend_macos.mm
+        src/tray/macos/tray_icon_mac.mm
+        src/tray/macos/tray_context_mac.mm
+    )
+    target_link_libraries(waty PRIVATE
+        "-framework UserNotifications"
+        "-framework Foundation"
+        "-framework Cocoa")
+else()
+    target_sources(waty PRIVATE
+        src/notify/backend_linux.cpp
+        src/tray/linux/tray_icon_linux.cpp
+        src/tray/linux/tray_context_linux.cpp
+        src/tray/linux/sni_dbus.cpp
+    )
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
     pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET libadwaita-1)
     pkg_check_modules(WEBKITGTK REQUIRED IMPORTED_TARGET webkitgtk-6.0)
-    target_link_libraries(waty PRIVATE PkgConfig::GTK4 PkgConfig::LIBADWAITA PkgConfig::WEBKITGTK)
+    pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
+    pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
+    pkg_check_modules(GDKPIXBUF REQUIRED IMPORTED_TARGET gdk-pixbuf-2.0)
+    target_link_libraries(waty PRIVATE
+        PkgConfig::GTK4 PkgConfig::LIBADWAITA PkgConfig::WEBKITGTK
+        PkgConfig::DBUS PkgConfig::GLIB PkgConfig::GDKPIXBUF)
 endif()
 
 # ---------------------------------------------------------------------------

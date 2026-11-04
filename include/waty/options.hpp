@@ -35,6 +35,7 @@ namespace waty
         bool log      = false;  // 是否转发 JS console 到 C++ 日志
         bool dialog   = false;  // 是否启用对话框模块
         bool sqlite3  = false;  // 是否启用 window.waty.sqlite3
+        bool notify   = false;  // 是否启用 window.waty.notify
 
         FsPermissionOptions fs;
     };

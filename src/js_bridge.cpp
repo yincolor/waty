@@ -218,6 +218,14 @@ namespace waty::detail
         };
     }
 
+    if (@@NOTIFY@@) {
+        window.waty.notify = {
+            send: (options) => request("notify", "send", { options: options || {} }),
+            hasPermission: () => request("notify", "hasPermission"),
+            requestPermission: () => request("notify", "requestPermission")
+        };
+    }
+
     window.addEventListener("error", (e) => {
         window.saucer.internal.message(JSON.stringify({ __waty: "jserror", message: e.message, source: e.filename, lineno: e.lineno, colno: e.colno }));
     });
@@ -263,6 +271,7 @@ namespace waty::detail
             script = replace_all(script, "@@FS_WRITE@@", p.fs.write ? "true" : "false");
             script = replace_all(script, "@@DIALOG@@", p.dialog ? "true" : "false");
             script = replace_all(script, "@@SQLITE3@@", p.sqlite3 ? "true" : "false");
+            script = replace_all(script, "@@NOTIFY@@", p.notify ? "true" : "false");
             script = replace_all(script, "@@LOG@@", p.log ? "true" : "false");
             return script;
         }
@@ -550,6 +559,10 @@ namespace waty::detail
         else if (channel == "sqlite3")
         {
             handle_sqlite3_request(impl, req);
+        }
+        else if (channel == "notify")
+        {
+            handle_notify_request(impl, req);
         }
         else if (channel == "jserror")
         {

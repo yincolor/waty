@@ -7,7 +7,7 @@
 
 - 窗口 / WebView / IPC 抽象，贴近 Electron 的开发模型
 - 前端资源嵌入（`waty_embed`），入口 HTML 由 C++ 侧决定
-- 常用桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框、多数据库 SQLite
+- 常用桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框、多数据库 SQLite、系统通知、系统托盘
 - 权限显式化：暴露给 JS 的能力默认关闭（IPC 基础能力默认开启）
 - 作为 CMake 库，可通过 `FetchContent` 集成
 
@@ -15,7 +15,7 @@
 
 - C++23 编译器（GCC 13+ / Clang 16+ / MSVC 19.35+）
 - CMake 3.25+
-- Linux 开发包：`libgtk-4-dev`、`libadwaita-1-dev`、`libwebkitgtk-6.0-dev`、`libjson-glib-dev`
+- Linux 开发包：`libgtk-4-dev`、`libadwaita-1-dev`、`libwebkitgtk-6.0-dev`、`libjson-glib-dev`、`libdbus-1-dev`、`libglib2.0-dev`、`libgdk-pixbuf-2.0-dev`
 - Windows：WebView2 Runtime
 - macOS：系统自带 Cocoa / WKWebView
 - SQLite 3.49.1（通过 FetchContent 自动获取，CI 需可访问 `github.com` 与 `sqlite.org`）
@@ -34,6 +34,7 @@ JS 侧能力默认关闭（IPC 除外），需要在 `ApplicationOptions::permis
 | `permissions.dialog` | `false` | `window.waty.dialog` |
 | `permissions.fs.read` / `.write` | `false` | `window.waty.fs` |
 | `permissions.sqlite3` | `false` | `window.waty.sqlite3` |
+| `permissions.notify` | `false` | `window.waty.notify` |
 
 ## 构建库
 
@@ -162,6 +163,52 @@ await db.close();
 - 错误对象为 `{ name: "WatySqlite3Error", code, message }`，错误码包括 `SQLITE3_INVALID_ARGUMENT`、`SQLITE3_PERMISSION_DENIED`、`SQLITE3_TOO_MANY_OPEN`、`SQLITE3_OPEN_FAILED`、`SQLITE3_NOT_OPEN`、`SQLITE3_EMPTY_SQL`、`SQLITE3_MULTI_STATEMENT`、`SQLITE3_EXEC_ERROR` 等，完整列表见 `DESIGN.md` 8.6.4。
 - 默认 `journal_mode=WAL`、`busy_timeout=5000`；`foreign_keys` 保持 SQLite 默认关闭，需要时请执行 `PRAGMA foreign_keys=ON`。
 
+## 系统通知 (Notify)
+
+`window.waty.notify` 提供系统通知（Windows Toast / macOS 通知 / Linux D-Bus）。默认关闭，需显式开启权限：
+
+```cpp
+app_opts.permissions.notify = true;  // 默认 false
+```
+
+```js
+await window.waty.notify.send({
+    title: "下载完成",
+    body: "movie.mp4 已保存",
+    timeout: 5000,                                  // 毫秒，可选
+    actions: [{ id: "open", label: "打开" }]        // 可选，最多 3 个
+});
+
+const status = await window.waty.notify.hasPermission();  // granted / denied / ...
+await window.waty.notify.requestPermission();
+
+// 事件（通过 waty.ipc.on 订阅）
+waty.ipc.on("notify-action", ({ id }) => {});
+waty.ipc.on("notify-closed", ({ reason }) => {});
+waty.ipc.on("notify-error", ({ code, message }) => {});
+```
+
+C++ 侧同样可用 `<waty/notify.hpp>`（`waty::notify::send` 等），详见 [DESIGN.md](DESIGN.md) 7.6。
+
+## 系统托盘 (Tray)
+
+系统托盘仅提供 C++ API（暂无 JS 桥），头文件 `<waty/tray.hpp>`，命名空间 `waty::tray`，已编译进 `waty` 库：
+
+```cpp
+#include <waty/tray.hpp>
+
+waty::tray::TrayContext context;
+context.initialize();
+
+auto tray = *waty::tray::TrayIcon::create();   // 失败返回 TrayError
+if (auto icon = waty::tray::Icon::from_file("assets/tray.png")) {
+    tray->set_icon(*icon);
+}
+tray->show();
+```
+
+> Linux 为完整实现（SNI D-Bus）；Windows / macOS 后端当前为占位，返回 `PlatformNotSupported`。详见 [DESIGN.md](DESIGN.md) 7.7。
+
 ## 网络说明
 
 依赖默认从 GitHub 直接下载。网络受限时请由使用者在本机配置代理，CMake 脚本不硬编码镜像或离线缓存：
@@ -186,7 +233,7 @@ ctest --test-dir build --output-on-failure
 
 ## 文档
 
-完整设计文档见 [DESIGN.md](DESIGN.md)（Sqlite3 详见 8.6，配置见 6.2 / 6.2.1，线程模型见 7.1）。
+完整设计文档见 [DESIGN.md](DESIGN.md)（Sqlite3 详见 8.6，通知详见 7.6 / 8.7，托盘详见 7.7，配置见 6.2 / 6.2.1，线程模型见 7.1）。
 
 ## 许可证
 

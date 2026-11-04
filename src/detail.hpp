@@ -288,6 +288,7 @@ namespace waty::detail
     void handle_fs_request(WebWindow::Impl &impl, const nlohmann::json &request);
     void handle_dialog_request(WebWindow::Impl &impl, const nlohmann::json &request);
     void handle_sqlite3_request(WebWindow::Impl &impl, const nlohmann::json &request);
+    void handle_notify_request(WebWindow::Impl &impl, const nlohmann::json &request);
 
     // web_window.cpp：图标路径解析（先查嵌入资源，再查可执行文件目录）
     std::string executable_path();

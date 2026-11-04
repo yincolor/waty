@@ -32,7 +32,7 @@
 
 - 提供类似 Electron 的窗口、WebView、IPC 抽象
 - 把前端构建产物嵌入二进制，实现单文件分发
-- 提供常用的桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框
+- 提供常用的桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框、系统通知、系统托盘
 - 作为 CMake 库，通过 `FetchContent` 即可被其他项目集成
 
 ---
@@ -67,7 +67,8 @@
 - 后端为 **GTK4 + WebKitGTK 6.0**
 - **推荐 GTK 4.10+**：以获得 `GtkAlertDialog` 支持，`showMessageBox` 将使用原生现代 API
 - **GTK 4.10 以下**：`showMessageBox` 回退到 `gtk_message_dialog_new`，功能可用，外观可能略有差异
-- 需安装：`gtk4`、`webkitgtk-6.0`
+- 需安装：`gtk4`、`libadwaita-1`、`webkitgtk-6.0`、`dbus-1`、`glib-2.0`、`gdk-pixbuf-2.0`
+- 其中 `dbus-1` / `glib-2.0` / `gdk-pixbuf-2.0` 由内置的 notify / tray 模块使用（Linux 下通过 pkg-config 自动查找）
 
 > **关于 saucer/desktop**：Saucer 的官方模块（包括 `desktop`、`pdf`、`loop`）随主库一起发布，版本与 Saucer 主库保持一致。使用 Saucer v8.x 时，`saucer/desktop` 自动为对应版本，无需单独指定版本号。自 Saucer v5.0.0 起，桌面相关功能正式移入 `saucer/desktop` 模块。
 
@@ -294,11 +295,12 @@ struct PermissionOptions {
     bool log = false;          // 是否转发 JS console 到 C++ 日志
     bool dialog = false;       // 是否启用对话框模块（open / save / message）
     bool sqlite3 = false;      // 是否启用 window.waty.sqlite3
+    bool notify = false;       // 是否启用 window.waty.notify
     FsPermissionOptions fs;    // 文件系统权限
 };
 ```
 
-> `dialog` / `sqlite3` 权限默认关闭，与 `os`、`window` 的权限模型保持一致。
+> `dialog` / `sqlite3` / `notify` 权限默认关闭，与 `os`、`window` 的权限模型保持一致。
 
 ### 6.2.1 Sqlite3Options
 
@@ -526,6 +528,9 @@ Waty 的线程模型与 Saucer 一致，核心规则只有三条：
 | `ww->emit` | 任意线程 | 内部投递到 UI 线程 |
 | `ww->showOpenDialog` / `showSaveDialog` / `showMessageBox` | UI 线程 | 操作原生对话框 |
 | JS `window.waty.sqlite3.*` 请求 | 桥接线程 + 每库工作线程 | 不阻塞 UI；同库串行、不同库并行 |
+| `waty::notify::send` / `has_permission` / `request_permission` | 任意线程 | 内部投递到通知事件线程（`waty-evt`） |
+| `waty::notify` 回调（`on_action` / `on_closed` / `on_error`） | 通知事件线程 | 串行、不重入 |
+| `waty::tray::*`（`TrayContext` / `TrayIcon` / `Menu`） | UI 线程 | 平台原生托盘对象绑定主循环 |
 | `Subscription::unsubscribe` | 任意线程 | 加锁，安全 |
 
 #### 7.1.4 详细规则
@@ -540,6 +545,8 @@ Waty 的线程模型与 Saucer 一致，核心规则只有三条：
 - **应用事件监听回调在 UI 线程执行**。
 - **事件循环任务（`onEventLoopTick`）在 UI 线程执行，每轮事件循环触发一次。** 回调中应避免耗时操作，否则会阻塞 UI 与 WebView。需要执行耗时逻辑时，应投递到线程池（如 `std::async`），并通过 `emit` 回到 UI 线程更新界面。任务回调中**禁止**注册或取消 `onEventLoopTick` 任务，违反会被检测并触发断言失败，程序退出（详见 7.3.3）。
 - **Sqlite3 请求不在 UI 线程执行**：JS 请求先进入内部桥接线程，再投递到对应数据库的工作线程（每个数据库一个）。同一数据库上的 `execute` / `query` / `transaction` 严格按调用顺序串行，不同数据库之间互不阻塞；响应通过 UI 线程 resolve JS Promise。Waty 内部保证 `SQLITE_THREADSAFE=1`，但使用者的 SQL 仍应避免长时间全表扫描阻塞该库上的后续操作。
+- **通知（`waty::notify`）自带独立事件线程**（`waty-evt`）：`send` / `has_permission` / `request_permission` 可从任意线程调用，内部投递到事件线程驱动平台后端；用户回调（`on_action` / `on_closed` / `on_error`）在事件线程串行执行、不重入，不阻塞 UI。回调内可直接再次调用 `send`；若需操作窗口，请通过 `emit` 或投递回 UI 线程。
+- **托盘（`waty::tray`）的创建与操作必须在 UI 线程**：`TrayContext` / `TrayIcon` 绑定平台原生主循环（Linux 为 GTK 默认主上下文），菜单/点击回调在 UI 线程执行。
 - **对话框方法（`showOpenDialog` / `showSaveDialog` / `showMessageBox`）必须在 UI 线程调用**，回调也在 UI 线程执行。原生对话框 API 依赖 UI 线程的消息循环，跨线程调用会被拒绝。
 - **窗口只读方法**（`getSize` / `getPosition` / `title` / `isMaximized` / `isMinimized` / `isVisible` / `id`）内部缓存窗口状态并加锁，任意线程可安全读取。缓存在窗口事件（`resize` / `move` / `maximize` / `minimize` / `show` / `hide` 等）触发时更新，因此刚变更后立即读取可能存在极小延迟。写方法（`setSize` / `setPosition` / `maximize` / `minimize` / `close` / `show` / `hide` 等）必须在 UI 线程调用。
 - **`Subscription::unsubscribe` 线程安全**。若回调正在执行，`unsubscribe` 不会中断当前回调；当前回调执行完成后不再触发后续回调。
@@ -954,6 +961,100 @@ parent->windowEventHandle("sub-window-close", [](waty::Event&, const nlohmann::j
 });
 ```
 
+### 7.6 系统通知（`waty::notify`）
+
+内置通知模块，封装三大平台原生通知（Windows WinRT Toast / macOS UserNotifications / Linux D-Bus）。头文件为 `<waty/notify.hpp>`，命名空间 `waty::notify`，已编译进 `waty` 库，无需额外链接。
+
+```cpp
+#include <waty/notify.hpp>
+
+waty::notify::notification n;
+n.title   = "下载完成";
+n.body    = "movie.mp4 已保存";
+n.timeout = std::chrono::milliseconds(5000);
+n.actions = {
+    {.id = "open", .label = "打开"},
+    {.id = "folder", .label = "打开文件夹"},
+};
+
+n.on_action = [](std::string_view id) { /* 用户点击了按钮 */ };
+n.on_closed = [](waty::notify::close_reason r) { /* 通知被关闭 */ };
+n.on_error  = [](const waty::notify::error &e) { /* 异步投递错误 */ };
+
+if (auto r = waty::notify::send(std::move(n)); !r) {
+    // r.error().code / r.error().message
+}
+```
+
+**关键类型：**
+
+| 类型 | 说明 |
+|---|---|
+| `notification` | 通知内容 + 回调；move-only，可用 designated initializers 构造 |
+| `action` | `{ id, label }`，按钮，上限 3 个 |
+| `permission_status` | `not_determined` / `granted` / `denied` / `provisional` / `unsupported` |
+| `close_reason` | `expired` / `dismissed` / `replaced` / `unknown` |
+| `errc` | `invalid_argument` / `permission_denied` / `not_supported` / `backend_unavailable` / `io_error` / `unknown` |
+
+**权限接口：**
+
+```cpp
+waty::notify::permission_status s = waty::notify::has_permission();  // 同步查询
+waty::notify::request_permission([](waty::notify::permission_status s) {
+    // 回调线程因平台而异；macOS 为系统授权弹窗
+});
+```
+
+**线程模型**：`send` / `has_permission` / `request_permission` 可从任意线程调用；内部由专用事件线程（`waty-evt`）驱动平台后端，用户回调在事件线程串行执行、不重入、不阻塞 UI。
+
+**平台差异**：Windows 未打包应用首次发通知前需调用 `waty::notify::platform::windows::register_aumid(...)`；macOS 首次发送会触发系统授权；Linux 依赖 D-Bus 会话总线（桌面环境需实现 `org.freedesktop.Notifications`）。
+
+### 7.7 系统托盘（`waty::tray`）
+
+内置系统托盘模块，核心库与 GUI 框架解耦。头文件为 `<waty/tray.hpp>`（单头文件），命名空间 `waty::tray`，已编译进 `waty` 库。
+
+```cpp
+#include <waty/tray.hpp>
+
+// 1. 初始化托盘平台环境（D-Bus 连接等）
+waty::tray::TrayContext context;
+if (auto r = context.initialize(); !r) { /* 处理 TrayError */ }
+
+// 2. 创建托盘图标
+auto icon_result = waty::tray::TrayIcon::create();  // TrayResult<std::unique_ptr<TrayIcon>>
+if (!icon_result) { /* 无托盘宿主等错误 */ }
+auto tray = std::move(*icon_result);
+
+// 3. 设置图标与菜单
+if (auto icon = waty::tray::Icon::from_file("assets/tray.png")) {
+    tray->set_icon(*icon);
+}
+
+waty::tray::Menu menu;
+waty::tray::MenuItem item;
+item.id       = "quit";
+item.label    = "退出";
+item.on_click = [] { /* 用户点击了菜单项（UI 线程） */ };
+menu.add_item(std::move(item));
+tray->set_menu(std::move(menu));
+
+tray->show();
+```
+
+**关键类型：**
+
+| 类型 | 说明 |
+|---|---|
+| `TrayContext` | 托盘运行期句柄，管理平台初始化与共享状态 |
+| `TrayIcon` | 托盘图标（抽象基类），`create()` 工厂创建 |
+| `Icon` | 图标来源：主题名 / RGBA / 文件路径 / 内存字节 |
+| `Menu` / `MenuItem` | 托盘菜单；`MenuItem::on_click` 在宿主 UI 线程执行 |
+| `TrayError` / `TrayResult<T>` | 统一错误码 / `std::expected` 封装 |
+
+**线程模型**：`TrayContext` / `TrayIcon` / `Menu` 的创建与操作必须在 UI 线程调用（平台原生托盘对象绑定主循环）。菜单/点击回调在 UI 线程执行。
+
+**平台支持**：Linux 为完整实现（SNI D-Bus）；Windows / macOS 后端当前为占位，`initialize()` / `create()` 返回 `TrayError::PlatformNotSupported`。
+
 ---
 
 ## 8. JavaScript API (`window.waty`)
@@ -970,6 +1071,7 @@ parent->windowEventHandle("sub-window-close", [](waty::Event&, const nlohmann::j
 | `window.waty.window` | `permissions.window` / `.devtools` | 8.4 |
 | `window.waty.dialog` | `permissions.dialog` | 8.5 |
 | `window.waty.sqlite3` | `permissions.sqlite3` | 8.6 |
+| `window.waty.notify` | `permissions.notify` | 8.7 |
 
 若 `permissions.ipc = false`，则 `window.waty.ipc` 未定义，访问结果为 `undefined`。
 
@@ -1431,6 +1533,42 @@ await db.close();
 - 默认 `journal_mode=WAL`、`busy_timeout=5000`；`foreign_keys` 保持 SQLite 默认（关闭），需要时由调用方执行 `PRAGMA foreign_keys=ON`。
 - 单个响应建议不超过 16 MB（WebView 消息通道为字符串序列化）。
 
+### 8.7 通知（需 `permissions.notify = true`）
+
+`window.waty.notify` 提供系统通知能力，对应 C++ 侧的 `waty::notify` 模块（见 7.6）。
+
+```js
+// 发送通知
+const { ok } = await window.waty.notify.send({
+    title: "下载完成",        // 必填
+    body: "movie.mp4 已保存", // 可选
+    icon: "assets/icon.png",  // 可选，本地路径或 file:// URI
+    actions: [                // 可选，按钮，上限 3
+        { id: "open", label: "打开" },
+        { id: "folder", label: "打开文件夹" }
+    ],
+    timeout: 5000,            // 可选，毫秒；不填用系统默认
+    tag: "msg-1"              // 可选，替换键（同 tag 后发覆盖先发）
+});
+
+// 权限
+const status = await window.waty.notify.hasPermission();
+// 'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'
+await window.waty.notify.requestPermission();
+```
+
+**事件**（通过 `window.waty.ipc.on` 订阅）：
+
+```js
+waty.ipc.on("notify-action", ({ id }) => { /* 用户点击了按钮 id */ });
+waty.ipc.on("notify-closed", ({ reason }) => { /* 0=expired 1=dismissed 2=replaced 3=unknown */ });
+waty.ipc.on("notify-error", ({ code, message }) => { /* 异步投递错误 */ });
+```
+
+**错误格式**：`{ name: "WatyNotifyError", code, message }`，`code` 为 `NOTIFY_INVALID_ARGUMENT` / `NOTIFY_PERMISSION_DENIED` / `NOTIFY_NOT_SUPPORTED` / `NOTIFY_BACKEND_UNAVAILABLE` / `NOTIFY_IO_ERROR` / `NOTIFY_UNKNOWN`。
+
+> notify 与 sqlite3 一样是内置 message 通道（channel = `notify`），不是 `ipcHandle` 的封装；二者共用底层 `window.saucer.internal.message` 与 Promise 请求表，但 channel 与错误模型独立。
+
 ---
 
 ## 9. IPC 异步处理与数据转换
@@ -1600,6 +1738,18 @@ declare global {
             sqlite3?: {
                 openDatabase(dbName: string, version: string): Promise<WatyDatabase>;
             };
+            notify?: {
+                send(options: {
+                    title: string;
+                    body?: string;
+                    icon?: string;
+                    actions?: Array<{ id: string; label: string }>;
+                    timeout?: number;
+                    tag?: string;
+                }): Promise<{ ok: boolean }>;
+                hasPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
+                requestPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
+            };
         };
     }
 }
@@ -1683,6 +1833,8 @@ export {};
 | `dialog.showSaveDialog` | `window.waty.dialog.showSaveDialog` | 同上 |
 | `dialog.showMessageBox` | `window.waty.dialog.showMessageBox` | 基于 Saucer Native API，平台原生实现 |
 | `better-sqlite3` / 原生 SQLite 模块 | `window.waty.sqlite3` | 内置多数据库访问，无需原生模块编译；需 `permissions.sqlite3` |
+| 系统通知（`Notification`） | `waty::notify`（C++）/ `window.waty.notify`（JS） | 内置系统通知；C++ 侧 `<waty/notify.hpp>`，JS 侧需 `permissions.notify` |
+| 系统托盘（`Tray`） | `waty::tray`（C++，`<waty/tray.hpp>`） | 内置系统托盘，仅 C++ API，暂无 JS 桥 |
 | 单实例锁 | `app.requestSingleInstanceLock()` | 直接对应，返回 false 应立即 `app.quit()` |
 | `app.getPath('userData')` | `getPath(SysPath::Config)` / `os.getPath("config")` | Linux 下均指向 `~/.config/<organizationName>/<appName>` 风格路径（默认 `waty`） |
 | `app.getPath('exe')` | `getPath(SysPath::Executable)` / `os.getPath("executable")` | 返回可执行文件完整路径（含文件名） |
@@ -1706,6 +1858,8 @@ waty/
 │       ├── web_window.hpp
 │       ├── options.hpp
 │       ├── dialog.hpp          # 对话框选项结构体
+│       ├── notify.hpp          # 系统通知模块公共 API
+│       ├── tray.hpp            # 系统托盘模块公共 API（单头文件）
 │       ├── subscription.hpp
 │       ├── event.hpp
 │       └── ipc_error.hpp
@@ -1717,6 +1871,9 @@ waty/
 │   ├── fs_bridge.cpp
 │   ├── base64.cpp / base64.hpp # base64（fs 与 BLOB 列共用）
 │   ├── dialog_bridge.cpp       # 对话框实现
+│   ├── notify_bridge.cpp       # notify 的 JS 桥（channel = notify）
+│   ├── notify/                 # 通知模块实现（api / event_loop / 各平台后端）
+│   ├── tray/                   # 托盘模块实现（common / linux / macos / windows）
 │   ├── sqlite3_database.cpp/.hpp # 单库连接 + 工作线程 + 串行队列
 │   ├── sqlite3_statement.hpp   # statement RAII / 参数绑定 / 列值转换
 │   ├── sqlite3_service.cpp/.hpp  # 库路由、打开/关闭、execute/query/transaction
@@ -1746,6 +1903,8 @@ waty/
 - 原生文件选择对话框（打开 / 保存），基于 `saucer/desktop` File-Picker
 - 原生消息框对话框，基于 Saucer Native API
 - 多数据库 SQLite 访问（`window.waty.sqlite3`，需 `permissions.sqlite3`）
+- 系统通知（C++ `<waty/notify.hpp>`；JS `window.waty.notify`，需 `permissions.notify`）
+- 系统托盘（C++ `<waty/tray.hpp>`，仅 C++ API，暂无 JS 桥）
 - 窗口控制、单实例锁
 - 应用退出默认行为的事件级控制（`window-all-closed` 可 `preventDefault`）
 - 默认将 WebView 运行时数据保存到符合 XDG 规范的用户数据目录
@@ -1786,6 +1945,9 @@ waty/
 - SQLite 打开数量受 `ApplicationOptions.sqlite3.maxOpenDatabases` 限制（默认 64），避免 JS 侧耗尽文件描述符；单个查询结果建议不超过 16 MB（message 通道为字符串序列化）。
 - SQLite 连接默认启用 WAL 与 `busy_timeout=5000`，但 `foreign_keys` 保持 SQLite 默认关闭；需要外键约束时由调用方显式 `PRAGMA foreign_keys=ON`，Waty 不代为修改全局语义。
 - SQLite 数据库文件可能包含业务敏感数据；Waty 不加密数据库文件，请依赖操作系统文件权限或自行使用 SQLCipher 等方案。
+- `window.waty.notify` 默认关闭，需 `permissions.notify = true`；未开启时 `window.waty.notify === undefined`，C++ 桥仍有二次权限校验（`NOTIFY_PERMISSION_DENIED`）。
+- 通知内容会交给操作系统原生通知中心展示，可能被系统记录；敏感内容请勿放入通知。
+- 系统托盘（`waty::tray`）仅提供 C++ API，不暴露给 JS，无对应权限开关；托盘菜单回调在 UI 线程执行，回调内不要做耗时操作。
 - `DevTools` 默认关闭，生产环境请勿随意开启。权限关闭时，C++ 调用 `ww->openDevTools()` 会抛出异常、JS 调用 `window.waty.window.openDevTools()` 会 reject，不会被静默忽略。
 - 图标路径解析会同时尝试嵌入资源和可执行文件目录，找不到时使用系统默认图标并记录日志。
 - IPC 请求回调（`ipcHandle`）在线程池中执行，注意线程安全，不要直接操作 UI。
@@ -1840,3 +2002,6 @@ waty/
 - **实现**：复用现有 message 桥（`sqlite3` channel），未引入 Saucer `expose`；C++ 实现全部位于 `waty::detail`，不新增公共 C++ API。
 - **测试**：新增 `-DWATY_BUILD_TESTS=ON`（默认关闭）与 `tests/sqlite3_tests.cpp`，覆盖参数校验、幂等、并发、事务、多库隔离与 `SQLITE_THREADSAFE`。
 - **文档**：同步更新 6.2 / 6.3 / 8.6 / 10 / 13 / 14。
+- **新增** `waty::notify` 系统通知模块（原 `waty-notify` 仓库合并入主库）：公共头 `<waty/notify.hpp>`，实现位于 `src/notify/`，编译进 `waty` 库；同时新增 JS 桥 `window.waty.notify`（需 `permissions.notify = true`）。
+- **新增** `waty::tray` 系统托盘模块（原 `waty-tray` 仓库合并入主库）：公共头 `<waty/tray.hpp>`（由原 6 个头文件合并为单头文件），实现位于 `src/tray/`，编译进 `waty` 库；仅提供 C++ API，暂无 JS 桥。
+- **依赖**：Linux 新增 `dbus-1` / `glib-2.0` / `gdk-pixbuf-2.0`；macOS 新增 UserNotifications / Foundation / Cocoa 框架并启用 OBJCXX；Windows 新增 `windowsapp` / `shell32` / `user32`。
