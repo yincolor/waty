@@ -111,9 +111,233 @@ namespace waty::detail
     if (@@OS@@) {
         window.waty.os = {
             platform: () => request("os", "platform"),
-            arch: () => request("os", "arch"),
-            homedir: () => request("os", "homedir"),
-            getPath: (p) => request("os", "getPath", { path: p })
+            arch: () => request("os", "arch")
+        };
+    }
+
+    if (@@PATH@@) {
+        const __watyPathData = @@PATH_DATA@@;
+        const __watyPathSep = @@PATH_SEP@@;
+        const __watyPathDelimiter = @@PATH_DELIMITER@@;
+        const __watyPathIsWin = __watyPathSep === "\\";
+
+        const __watyPathError = (code, message) => {
+            const error = new Error(message);
+            error.name = "WatyPathError";
+            error.code = code;
+            return error;
+        };
+
+        const __watyPathAssert = (value, name) => {
+            if (typeof value !== "string") throw new TypeError(name + " 必须是字符串");
+            if (/^[A-Za-z][A-Za-z0-9+.-]+:\/\//.test(value)) {
+                throw __watyPathError("PATH_INVALID_ARGUMENT", name + " 必须是文件系统路径，不能是 URL: " + value);
+            }
+            return value;
+        };
+
+        const __watyPathIsSep = (ch) => __watyPathIsWin ? (ch === "/" || ch === "\\") : (ch === "/");
+
+        const __watyPathIsAbsolute = (value) => {
+            if (value === "") return false;
+            if (__watyPathIsWin) {
+                return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value);
+            }
+            return value.startsWith("/");
+        };
+
+        const __watyPathNormalizePosix = (value) => {
+            if (value === "") return ".";
+            if (/^\/+$/.test(value)) return value;
+            const absolute = value.startsWith("/");
+            const parts = value.split("/");
+            const out = [];
+            let trailing = false;
+            let last = "";
+            for (const part of parts) {
+                if (part === "") { trailing = true; continue; }
+                if (part === ".") { trailing = true; last = "."; continue; }
+                if (part === "..") {
+                    if (out.length && out[out.length - 1] !== "..") out.pop();
+                    else if (!absolute) out.push("..");
+                    trailing = true;
+                    last = "..";
+                    continue;
+                }
+                out.push(part);
+                trailing = false;
+                last = part;
+            }
+            let result = (absolute ? "/" : "") + out.join("/");
+            if (result === "") return ".";
+            if (result !== "/" && result !== "." && result !== ".." && trailing &&
+                (last === "." || last === ".." || value.endsWith("/"))) {
+                result += "/";
+            }
+            return result;
+        };
+
+        const __watyPathNormalizeWin = (value) => {
+            if (value === "") return ".";
+            let normalized = value.replace(/\//g, "\\");
+            if (/^\\+$/.test(normalized)) return normalized;
+
+            let prefix = "";
+            let rest = normalized;
+            const drive = /^([A-Za-z]:)/.exec(normalized);
+            if (drive) {
+                prefix = drive[1];
+                rest = normalized.slice(2);
+            } else if (normalized.startsWith("\\\\")) {
+                prefix = "\\\\";
+                rest = normalized.slice(2);
+            }
+
+            const absolute = rest.startsWith("\\");
+            if (absolute) rest = rest.slice(1);
+            const parts = rest.split("\\");
+            const out = [];
+            let trailing = false;
+            let last = "";
+            for (const part of parts) {
+                if (part === "") { trailing = true; continue; }
+                if (part === ".") { trailing = true; last = "."; continue; }
+                if (part === "..") {
+                    if (out.length && out[out.length - 1] !== "..") out.pop();
+                    else if (!absolute) out.push("..");
+                    trailing = true;
+                    last = "..";
+                    continue;
+                }
+                out.push(part);
+                trailing = false;
+                last = part;
+            }
+
+            let result = prefix + (absolute ? "\\" : "") + out.join("\\");
+            if (result === "") return ".";
+            if (result !== prefix + "\\" && result !== "." && result !== ".." && trailing &&
+                (last === "." || last === ".." || value.endsWith("/") || value.endsWith("\\"))) {
+                if (!result.endsWith("\\")) result += "\\";
+            }
+            return result;
+        };
+
+        const __watyPathNormalize = (value) =>
+            __watyPathIsWin ? __watyPathNormalizeWin(value) : __watyPathNormalizePosix(value);
+
+        const __watyPathJoin = (parts) => {
+            let result = "";
+            for (const raw of parts) {
+                const part = __watyPathAssert(raw, "path.join 参数");
+                if (result === "" || __watyPathIsAbsolute(part)) result = part;
+                else if (result.endsWith(__watyPathSep)) result += part;
+                else result += __watyPathSep + part;
+            }
+            return result === "" ? "." : __watyPathNormalize(result);
+        };
+
+        const __watyPathCwd = () => {
+            if (!__watyPathData.cwdOk) {
+                throw __watyPathError("PATH_NOT_AVAILABLE", __watyPathData.cwdError || "当前工作目录不可用");
+            }
+            return __watyPathData.cwd;
+        };
+
+        const __watyPathStripTrailing = (value) => {
+            if (value.length > 1 && (value.endsWith("/") || value.endsWith("\\"))) {
+                if (/^[A-Za-z]:[\\/]$/.test(value)) return value;
+                return value.slice(0, -1);
+            }
+            return value;
+        };
+
+        const __watyPathResolve = (parts) => {
+            let result = "";
+            for (const raw of parts) {
+                const part = __watyPathAssert(raw, "path.resolve 参数");
+                if (part === "") continue;
+                if (__watyPathIsAbsolute(part)) result = part;
+                else if (result === "") result = part;
+                else if (result.endsWith(__watyPathSep)) result += part;
+                else result += __watyPathSep + part;
+            }
+            if (result === "") result = __watyPathCwd();
+            else if (!__watyPathIsAbsolute(result)) result = __watyPathCwd() + __watyPathSep + result;
+            return __watyPathStripTrailing(__watyPathNormalize(result));
+        };
+
+        const __watyPathBasename = (value, ext) => {
+            const p = __watyPathAssert(value, "path.basename 参数");
+            if (ext !== undefined && typeof ext !== "string") throw new TypeError("path.basename ext 必须是字符串");
+            if (p === "" || __watyPathIsSep(p[p.length - 1])) return "";
+            let start = p.length - 1;
+            while (start >= 0 && !__watyPathIsSep(p[start])) start--;
+            let name = p.slice(start + 1);
+            if (ext && name !== ext && name.length > ext.length && name.endsWith(ext)) {
+                name = name.slice(0, -ext.length);
+            }
+            return name;
+        };
+
+        const __watyPathDirname = (value) => {
+            const p = __watyPathAssert(value, "path.dirname 参数");
+            if (p === "") return ".";
+            if ([...p].every(__watyPathIsSep)) return p;
+
+            let end = p.length;
+            while (end > 0 && __watyPathIsSep(p[end - 1])) end--;
+            if (end < p.length) {
+                let result = p.slice(0, end);
+                if (/^[A-Za-z]:$/.test(result)) result += __watyPathSep;
+                return result || ".";
+            }
+
+            let index = p.length - 1;
+            while (index >= 0 && !__watyPathIsSep(p[index])) index--;
+            if (index < 0) return ".";
+
+            let result = p.slice(0, index);
+            while (result.length > 1 && __watyPathIsSep(result[result.length - 1])) result = result.slice(0, -1);
+            if (result === "") return __watyPathIsSep(p[0]) ? p[0] : ".";
+            if (/^[A-Za-z]:$/.test(result)) result += __watyPathSep;
+            return result;
+        };
+
+        const __watyPathExtname = (value) => {
+            const p = __watyPathAssert(value, "path.extname 参数");
+            const name = __watyPathBasename(p);
+            if (name === "" || name === "." || name === "..") return "";
+            const index = name.lastIndexOf(".");
+            return index <= 0 ? "" : name.slice(index);
+        };
+
+        window.waty.path = {
+            sep: __watyPathSep,
+            delimiter: __watyPathDelimiter,
+            cwd: () => __watyPathCwd(),
+            normalize: (value) => __watyPathNormalize(__watyPathAssert(value, "path.normalize 参数")),
+            join: (...parts) => __watyPathJoin(parts),
+            resolve: (...parts) => __watyPathResolve(parts),
+            basename: (value, ext) => __watyPathBasename(value, ext),
+            dirname: (value) => __watyPathDirname(value),
+            extname: (value) => __watyPathExtname(value),
+            isAbsolute: (value) => __watyPathIsAbsolute(__watyPathAssert(value, "path.isAbsolute 参数")),
+            getPath: (name) => {
+                if (typeof name !== "string") throw new TypeError("path.getPath name 必须是字符串");
+                const entry = __watyPathData.paths[name];
+                if (!entry) throw __watyPathError("PATH_INVALID_ARGUMENT", "未知路径: " + name);
+                if (!entry.ok) {
+                    throw __watyPathError(entry.code || "PATH_NOT_AVAILABLE", entry.message || ("路径不可用: " + name));
+                }
+                return entry.value;
+            }
+        };
+
+        window.waty.__watyPathSetCwd = (cwd, error) => {
+            __watyPathData.cwd = typeof cwd === "string" ? cwd : "";
+            __watyPathData.cwdError = typeof error === "string" ? error : "";
+            __watyPathData.cwdOk = __watyPathData.cwd !== "" && __watyPathData.cwdError === "";
         };
     }
 
@@ -219,8 +443,78 @@ namespace waty::detail
     }
 
     if (@@NOTIFY@@) {
+        let __watyNotifySeq = 0;
+        const __watyNotifyCallbacks = Object.create(null);
+
+        // C++ 侧通过 window.emit("notify-event", ...) 投递；直接挂内部 listener，
+        // 不依赖 permissions.ipc，也不会与旧版 notify-action/closed/error 事件冲突。
+        const __watyNotifyDispatch = (data) => {
+            if (!data || !data.callbackId) return;
+            const callback = __watyNotifyCallbacks[data.callbackId];
+            if (!callback) return;
+            if (data.event === "close" || data.event === "error") {
+                delete __watyNotifyCallbacks[data.callbackId];
+            }
+            try {
+                callback(data);
+            } catch (error) {
+                console.error("notify callback 异常", error);
+            }
+        };
+        window.waty.__listeners["notify-event"] = window.waty.__listeners["notify-event"] || [];
+        window.waty.__listeners["notify-event"].push(__watyNotifyDispatch);
+
+        const __watyNotifyDispatcher = (callbackOrHandlers) => {
+            if (callbackOrHandlers == null) {
+                return null;
+            }
+            if (typeof callbackOrHandlers === "function") {
+                return callbackOrHandlers;
+            }
+            if (typeof callbackOrHandlers !== "object") {
+                throw new TypeError("notify.send 第二个参数必须是函数或 handlers 对象");
+            }
+
+            const onAction = callbackOrHandlers.onAction;
+            const onClose  = callbackOrHandlers.onClose;
+            const onError  = callbackOrHandlers.onError;
+            for (const [name, handler] of [["onAction", onAction], ["onClose", onClose], ["onError", onError]]) {
+                if (handler != null && typeof handler !== "function") {
+                    throw new TypeError("notify.send " + name + " 必须是函数");
+                }
+            }
+            if (onAction == null && onClose == null && onError == null) {
+                throw new TypeError("notify.send handlers 至少需要 onAction / onClose / onError 之一");
+            }
+
+            return (event) => {
+                if (event.event === "action" && onAction) onAction(event);
+                else if (event.event === "close" && onClose) onClose(event);
+                else if (event.event === "error" && onError) onError(event);
+            };
+        };
+
         window.waty.notify = {
-            send: (options) => request("notify", "send", { options: options || {} }),
+            send: (options, callbackOrHandlers) => {
+                let dispatcher;
+                try {
+                    dispatcher = __watyNotifyDispatcher(callbackOrHandlers);
+                } catch (error) {
+                    return Promise.reject(error);
+                }
+
+                let callbackId = 0;
+                if (dispatcher) {
+                    callbackId = ++__watyNotifySeq;
+                    __watyNotifyCallbacks[callbackId] = dispatcher;
+                }
+
+                const promise = request("notify", "send", { options: options || {}, callbackId });
+                if (callbackId !== 0) {
+                    promise.catch(() => { delete __watyNotifyCallbacks[callbackId]; });
+                }
+                return promise;
+            },
             hasPermission: () => request("notify", "hasPermission"),
             requestPermission: () => request("notify", "requestPermission")
         };
@@ -264,8 +558,53 @@ namespace waty::detail
         {
             std::string script = k_bridge_script;
             const auto &p = impl.permissions;
+
+            nlohmann::json paths = nlohmann::json::object();
+            if (p.path)
+            {
+                const auto add_path = [&](const char *key, SysPath sys_path) {
+                    try
+                    {
+                        paths[key] = {{"ok", true},
+                                      {"value", path::getPath(sys_path, impl.organization_name, impl.app_name)}};
+                    }
+                    catch (const PathError &ex)
+                    {
+                        paths[key] = {{"ok", false}, {"code", ex.code()}, {"message", ex.what()}};
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        paths[key] = {{"ok", false},
+                                      {"code", "PATH_NOT_AVAILABLE"},
+                                      {"message", ex.what()}};
+                    }
+                };
+
+                add_path("appData", SysPath::AppData);
+                add_path("config", SysPath::Config);
+                add_path("temp", SysPath::Temp);
+                add_path("downloads", SysPath::Downloads);
+                add_path("documents", SysPath::Documents);
+                add_path("executable", SysPath::Executable);
+                add_path("home", SysPath::Home);
+                add_path("cache", SysPath::Cache);
+                add_path("logs", SysPath::Logs);
+            }
+
+            nlohmann::json path_data;
+            path_data["paths"]    = std::move(paths);
+            path_data["cwd"]      = impl.js_cwd;
+            path_data["cwdOk"]    = !impl.js_cwd.empty() && impl.js_cwd_error.empty();
+            path_data["cwdError"] = impl.js_cwd_error;
+
             script = replace_all(script, "@@IPC@@", p.ipc ? "true" : "false");
             script = replace_all(script, "@@OS@@", p.os ? "true" : "false");
+            script = replace_all(script, "@@PATH@@", p.path ? "true" : "false");
+            script = replace_all(script, "@@PATH_DATA@@", path_data.dump());
+            script = replace_all(script, "@@PATH_SEP@@",
+                                 nlohmann::json(std::string(1, path::sep())).dump());
+            script = replace_all(script, "@@PATH_DELIMITER@@",
+                                 nlohmann::json(std::string(path::delimiter())).dump());
             script = replace_all(script, "@@WINDOW@@", p.window ? "true" : "false");
             script = replace_all(script, "@@FS_READ@@", p.fs.read ? "true" : "false");
             script = replace_all(script, "@@FS_WRITE@@", p.fs.write ? "true" : "false");
@@ -377,43 +716,7 @@ namespace waty::detail
 #endif
                 return;
             }
-            if (op == "homedir")
-            {
-                const char *home = std::getenv("HOME");
-                respond(impl, id, home ? std::string(home) : std::string{});
-                return;
-            }
-            if (op == "getPath")
-            {
-                const std::string path = req.value("path", "");
-                SysPath sp = SysPath::Home;
-                if (path == "appData") sp = SysPath::AppData;
-                else if (path == "config") sp = SysPath::Config;
-                else if (path == "temp") sp = SysPath::Temp;
-                else if (path == "downloads") sp = SysPath::Downloads;
-                else if (path == "documents") sp = SysPath::Documents;
-                else if (path == "executable") sp = SysPath::Executable;
-                else if (path == "home") sp = SysPath::Home;
-                else if (path == "cache") sp = SysPath::Cache;
-                else if (path == "logs") sp = SysPath::Logs;
-                else if (path == "userData")
-                {
-                    log_message("warn", "waty: os.getPath(\"userData\") 已废弃，请改用 \"config\"");
-                    sp = SysPath::Config;
-                }
-                else if (path == "appDir")
-                {
-                    log_message("warn", "waty: os.getPath(\"appDir\") 已废弃，请改用 \"executable\"");
-                    sp = SysPath::Executable;
-                }
-                else
-                {
-                    respond_error(impl, id, nlohmann::json{{"name", "WatyOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown path"}});
-                    return;
-                }
-                respond(impl, id, impl.app->getPath(sp));
-                return;
-            }
+
             respond_error(impl, id, nlohmann::json{{"name", "WatyOsError"}, {"code", "OS_INVALID_ARGUMENT"}, {"message", "unknown op"}});
         }
 
@@ -599,6 +902,20 @@ namespace waty::detail
         }
         impl.bridge_ready = true;
 
+        if (impl.permissions.path)
+        {
+            try
+            {
+                impl.js_cwd = path::cwd();
+                impl.js_cwd_error.clear();
+            }
+            catch (const std::exception &ex)
+            {
+                impl.js_cwd.clear();
+                impl.js_cwd_error = ex.what();
+            }
+        }
+
         if (impl.view)
         {
             impl.view->inject({.code = build_js_script(impl), .run_at = saucer::script::time::creation, .clearable = false});
@@ -610,6 +927,40 @@ namespace waty::detail
                 }
                 return saucer::status::unhandled;
             }, .clearable = false}});
+
+            if (impl.permissions.path && impl.app)
+            {
+                impl.cwd_subscription = impl.app->onEventLoopTick([impl_ptr = &impl] {
+                    if (!impl_ptr->view)
+                    {
+                        return;
+                    }
+
+                    std::string cwd;
+                    std::string error;
+                    try
+                    {
+                        cwd = path::cwd();
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        error = ex.what();
+                    }
+
+                    if (cwd == impl_ptr->js_cwd && error == impl_ptr->js_cwd_error)
+                    {
+                        return;
+                    }
+
+                    impl_ptr->js_cwd       = cwd;
+                    impl_ptr->js_cwd_error = error;
+
+                    const auto code =
+                        "if (window.waty && window.waty.__watyPathSetCwd) window.waty.__watyPathSetCwd(" +
+                        nlohmann::json(cwd).dump() + "," + nlohmann::json(error).dump() + ");";
+                    impl_ptr->view->execute(code);
+                });
+            }
         }
     }
 } // namespace waty::detail

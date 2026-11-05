@@ -23,6 +23,7 @@ enum class close_reason {
     dismissed,  // 用户主动关闭
     replaced,   // 被同 tag 的后继通知替换
     unknown,
+    action,     // 用户点击按钮后由库关闭（一次性 action）
 };
 
 // ---- 权限状态 ----
@@ -73,7 +74,12 @@ struct notification {
     std::optional<std::chrono::milliseconds> timeout;  // 不填用系统默认
     std::optional<std::string>               tag;      // 替换键
 
+    // 点击任一 action 后立即关闭通知，并忽略后续 action。
+    // 默认 true；设为 false 时通知保持打开，允许重复点击（由平台决定是否支持）。
+    bool close_on_action = true;
+
     // -- 事件（可选） --
+    // close_on_action=true 时只触发一次，随后触发 on_closed(close_reason::action)。
     std::move_only_function<void(std::string_view)> on_action;
     std::move_only_function<void(close_reason)>     on_closed;
     std::move_only_function<void(const error&)>     on_error;

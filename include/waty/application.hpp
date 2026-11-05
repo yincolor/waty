@@ -2,6 +2,7 @@
 
 #include <waty/event.hpp>
 #include <waty/options.hpp>
+#include <waty/paths.hpp>
 #include <waty/subscription.hpp>
 #include <waty/web_window.hpp>
 
@@ -17,24 +18,6 @@
 
 namespace waty
 {
-    /// 应用路径（见文档 7.3.2）
-    enum class SysPath
-    {
-        AppData,      // XDG_DATA_HOME/<organizationName>/<appName>/
-        Config,       // XDG_CONFIG_HOME/<organizationName>/<appName>/，原 UserData
-        Temp,
-        Downloads,
-        Documents,
-        Executable,   // 可执行文件完整路径（含文件名），原 AppDir
-        Home,
-        Cache,        // XDG_CACHE_HOME/<organizationName>/<appName>/
-        Logs,
-
-        // deprecated aliases（保留源码兼容）
-        UserData = Config,
-        AppDir = Executable,
-    };
-
     /// 应用生命周期管理（见文档 7.3）。
     class Application
     {
@@ -70,8 +53,8 @@ namespace waty
         /// 运行事件循环，返回进程退出码
         int run();
 
-        /// 应用路径
-        std::string getPath(SysPath path) const;
+        /// 设置/切换文件日志。std::nullopt 关闭文件日志；空字符串也视为关闭并记录 warning。
+        void setLogFile(std::optional<std::string_view> path);
 
         /// 读取嵌入资源字节；path 为相对嵌入根目录的路径（如 "icon.png"），未找到返回 std::nullopt
         std::optional<std::vector<std::uint8_t>> readEmbeddedFile(std::string_view path) const;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(waty LANGUAGES CXX VERSION 3.5.0)
+project(waty LANGUAGES CXX VERSION 0.1.0)
 
 include(FetchContent)
 
@@ -67,6 +67,7 @@ include(cmake/waty_embed.cmake)
 
 add_library(waty STATIC
     src/application.cpp
+    src/paths.cpp
     src/web_window.cpp
     src/js_bridge.cpp
     src/fs_bridge.cpp

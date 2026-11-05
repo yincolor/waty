@@ -7,7 +7,7 @@
 
 - 窗口 / WebView / IPC 抽象，贴近 Electron 的开发模型
 - 前端资源嵌入（`waty_embed`），入口 HTML 由 C++ 侧决定
-- 常用桌面能力：文件系统、系统信息、日志、崩溃捕获、原生对话框、多数据库 SQLite、系统通知、系统托盘
+- 常用桌面能力：文件系统、系统信息、路径工具、日志、崩溃捕获、原生对话框、多数据库 SQLite、系统通知、系统托盘
 - 权限显式化：暴露给 JS 的能力默认关闭（IPC 基础能力默认开启）
 - 作为 CMake 库，可通过 `FetchContent` 集成
 
@@ -27,7 +27,8 @@ JS 侧能力默认关闭（IPC 除外），需要在 `ApplicationOptions::permis
 | 权限 | 默认 | 开启后可用 |
 |---|---|---|
 | `permissions.ipc` | `true` | `window.waty.ipc` |
-| `permissions.os` | `false` | `window.waty.os`（`platform` / `getPath`） |
+| `permissions.os` | `false` | `window.waty.os`（`platform` / `arch`） |
+| `permissions.path` | `false` | `window.waty.path`（同步路径工具 / `getPath` / `resolve` / `cwd`） |
 | `permissions.window` | `false` | `window.waty.window`（窗口控制、DevTools） |
 | `permissions.devtools` | `false` | `window.waty.window.openDevTools()` |
 | `permissions.log` | `false` | JS `console.*` 转发到 C++ 日志 |
@@ -81,7 +82,7 @@ project(my_app LANGUAGES CXX)
 include(FetchContent)
 FetchContent_Declare(waty
     GIT_REPOSITORY https://github.com/<you>/waty.git
-    GIT_TAG v3.5.0)
+    GIT_TAG v0.1.0)
 FetchContent_MakeAvailable(waty)
 
 add_executable(my_app main.cpp)
@@ -116,6 +117,24 @@ else
 ```
 
 `path` 为相对嵌入根目录的路径（与 `loadFile` 的 `entry` 同一命名空间）；未找到时返回 `std::nullopt`。
+
+## 路径模块
+
+路径功能位于独立头 `<waty/paths.hpp>`，不再挂在 `Application` 上：
+
+```cpp
+#include <waty/paths.hpp>
+
+auto logs = waty::path::getPath(waty::SysPath::Logs, app_opts);
+auto file = waty::path::join(logs, "app.log");
+```
+
+- 采用 `std::filesystem` 词法语义：`join("/a", "/b") == "/b"`、`join("a", "") == "a/"`、空结果统一为 `"."`。
+- `normalize` / `join` / `resolve` / `basename` / `dirname` / `extname` / `isAbsolute` / `cwd` 均可用。
+- `getPath` 需要应用级路径时显式传入 `organizationName` / `appName`；也可传 `ApplicationOptions`。
+- 路径函数拒绝 URL scheme，失败时抛 `waty::PathError`（`PATH_INVALID_ARGUMENT` / `PATH_NOT_AVAILABLE`）。
+- JS 侧 `window.waty.path` 为同步模块，需 `permissions.path = true`；`path.cwd()` / `path.resolve()` 使用每轮事件循环刷新的 cwd 缓存。
+- v0.1.0 已移除 `Application::getPath`、`os.homedir()`、`os.getPath()` 与 `SysPath::UserData` / `AppDir` 别名。
 
 ## IPC
 
@@ -172,21 +191,44 @@ app_opts.permissions.notify = true;  // 默认 false
 ```
 
 ```js
-await window.waty.notify.send({
-    title: "下载完成",
-    body: "movie.mp4 已保存",
-    timeout: 5000,                                  // 毫秒，可选
-    actions: [{ id: "open", label: "打开" }]        // 可选，最多 3 个
-});
+// 单回调：接收该通知的 action / close / error
+const { ok } = await window.waty.notify.send(
+    {
+        title: "下载完成",
+        body: "movie.mp4 已保存",
+        timeout: 5000,                                  // 毫秒，可选
+        closeOnAction: true,                            // 默认 true：点击后关闭并忽略后续 action
+        actions: [{ id: "open", label: "打开" }]        // 可选，最多 3 个
+    },
+    (event) => {
+        switch (event.event) {
+            case "action": console.log(event.actionId, event.label); break;
+            case "close":  console.log(event.reason, event.reasonCode); break;
+            case "error":  console.error(event.code, event.message); break;
+        }
+    }
+);
+
+// 结构化 handlers：按事件类型分别处理
+await window.waty.notify.send(
+    { title: "下载完成", actions: [{ id: "open", label: "打开" }] },
+    {
+        onAction(event) { console.log(event.actionId); },
+        onClose(event)  { console.log(event.reason); },
+        onError(event)  { console.error(event.code, event.message); }
+    }
+);
 
 const status = await window.waty.notify.hasPermission();  // granted / denied / ...
 await window.waty.notify.requestPermission();
 
-// 事件（通过 waty.ipc.on 订阅）
-waty.ipc.on("notify-action", ({ id }) => {});
-waty.ipc.on("notify-closed", ({ reason }) => {});
+// 兼容旧版全局事件；per-send 回调是推荐方式
+waty.ipc.on("notify-action", ({ id }) => { /* 默认仅首次 action */ });
+waty.ipc.on("notify-closed", ({ reason }) => { /* 4=action */ });
 waty.ipc.on("notify-error", ({ code, message }) => {});
 ```
+
+事件对象包含 `callbackId`、`title`、`tag`，以及：`action` 的 `actionId` / `label`，`close` 的 `reason` / `reasonCode`，`error` 的 `code` / `message`。默认点击按钮后通知立即关闭，`close.reason` 为 `"action"`，后续点击不会再触发；`close` / `error` 后回调自动移除。
 
 C++ 侧同样可用 `<waty/notify.hpp>`（`waty::notify::send` 等），详见 [DESIGN.md](DESIGN.md) 7.6。
 

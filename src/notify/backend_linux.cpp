@@ -289,6 +289,7 @@ class backend_linux final : public backend {
 
         notification n = std::move(it->second);
         pending_.erase(it);
+        erase_tag_mapping(id);
 
         if (!n.on_closed) {
             return;
@@ -319,16 +320,66 @@ class backend_linux final : public backend {
         if (it == pending_.end()) {
             return;
         }
-        if (!it->second.on_action) {
+
+        if (!it->second.close_on_action) {
+            if (!it->second.on_action) {
+                return;
+            }
+            try {
+                it->second.on_action(action_key);
+            } catch (...) {
+                std::fprintf(stderr, "waty: error: on_action callback threw an exception\n");
+            }
             return;
         }
 
-        // on_action 可多次触发（§3.2 不变量 4），不移除映射。
-        try {
-            it->second.on_action(action_key);
-        } catch (...) {
-            std::fprintf(stderr, "waty: error: on_action callback threw an exception\n");
+        // 一次性 action：先摘除 pending，再关闭平台通知；后续 ActionInvoked 会被忽略。
+        notification n = std::move(it->second);
+        pending_.erase(it);
+        erase_tag_mapping(id);
+        close_notification(id);
+
+        if (n.on_action) {
+            try {
+                n.on_action(action_key);
+            } catch (...) {
+                std::fprintf(stderr, "waty: error: on_action callback threw an exception\n");
+            }
         }
+        if (n.on_closed) {
+            try {
+                n.on_closed(close_reason::action);
+            } catch (...) {
+                std::fprintf(stderr, "waty: error: on_closed callback threw an exception\n");
+            }
+        }
+    }
+
+    void erase_tag_mapping(std::uint32_t id) {
+        for (auto it = tag_to_id_.begin(); it != tag_to_id_.end();) {
+            if (it->second == id) {
+                it = tag_to_id_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    void close_notification(std::uint32_t id) {
+        if (!conn_) {
+            return;
+        }
+        DBusMessage* message =
+            dbus_message_new_method_call(k_service, k_path, k_interface, "CloseNotification");
+        if (!message) {
+            return;
+        }
+        DBusMessageIter args;
+        dbus_message_iter_init_append(message, &args);
+        dbus_message_iter_append_basic(&args, DBUS_TYPE_UINT32, &id);
+        dbus_connection_send(conn_, message, nullptr);
+        dbus_connection_flush(conn_);
+        dbus_message_unref(message);
     }
 
     DBusConnection* conn_ = nullptr;

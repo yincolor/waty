@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-waty 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架，目标是提供类似 Electron 的开发体验：用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。项目当前版本为 `v3.5.0`，采用 **AGPL-3.0** 许可证。
+waty 是一个基于 **Saucer + C++23 + CMake** 的轻量级桌面应用框架，目标是提供类似 Electron 的开发体验：用 C++ 组织窗口、WebView 与 IPC，前端构建产物可嵌入二进制实现单文件分发。项目当前版本为 `v0.1.0`，采用 **AGPL-3.0** 许可证。
 
 ## 技术栈
 
@@ -47,8 +47,10 @@ waty/
 ├── CMakeLists.txt # 顶层构建配置
 ├── LICENSE # AGPL-3.0协议
 ├── README.md
-└── test # 测试代码放在这里，避免污染其他地方;已经有一个waty-app-template测试项目可以用于测试了，直接改这个即可，把测试样例中连接目标改为编译的新的静态库
+└── tests # waty 库自身测试（如 sqlite3）
 ```
+
+> 外部示例项目 `../waty-app-template` 通过 FetchContent 引入 waty，可在其中做集成/e2e 测试。
 
 > 注：`cmake/waty_embed.cmake` 是提供给使用者的资源嵌入函数，位于 `waty_SOURCE_DIR/cmake/` 路径下。
 
@@ -144,7 +146,7 @@ include(FetchContent)
 FetchContent_Declare(
     waty
     GIT_REPOSITORY https://github.com/yincolor/waty.git
-    GIT_TAG v3.5.0
+    GIT_TAG v0.1.0
 )
 FetchContent_MakeAvailable(waty)
 

@@ -265,8 +265,10 @@ namespace waty
     {
         m_impl->app        = app;
         m_impl->id         = id;
-        m_impl->permissions = app->m_impl->permissions;
-        m_impl->title      = std::string(options.title);
+        m_impl->permissions       = app->m_impl->permissions;
+        m_impl->app_name          = app->m_impl->app_name;
+        m_impl->organization_name = app->m_impl->organization_name;
+        m_impl->title             = std::string(options.title);
         m_impl->width      = options.width;
         m_impl->height     = options.height;
         m_impl->min_width  = options.minWidth;
@@ -308,7 +310,7 @@ namespace waty
         }
         else if (app)
         {
-            const auto base = app->getPath(SysPath::AppData);
+            const auto base = app->m_impl->app_data_dir;
             auto data_dir   = std::filesystem::path(base) / "webview";
 
             std::error_code ec;
@@ -337,6 +339,11 @@ namespace waty
 
     WebWindow::~WebWindow()
     {
+        if (m_impl && m_impl->cwd_subscription.valid())
+        {
+            m_impl->cwd_subscription.unsubscribe();
+        }
+
         // 窗口对象销毁：注销该窗口的全部 SQLite 句柄；若某个库已无其他窗口持有，
         // 连接会在 release_all 内部排空队列后关闭。应用退出时此处是最后一道兜底。
         if (m_impl && m_impl->sqlite3)

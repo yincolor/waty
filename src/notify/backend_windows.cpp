@@ -265,6 +265,7 @@ class backend_windows final : public backend {
 
         pending_entry entry = std::move(it->second);
         pending_.erase(it);
+        erase_tag_mapping(id);
 
         if (!entry.callbacks.on_closed) {
             return;
@@ -292,15 +293,54 @@ class backend_windows final : public backend {
 
     void on_activated(std::uint64_t id, IInspectable const& args) {
         const auto it = pending_.find(id);
-        if (it == pending_.end() || !it->second.callbacks.on_action) {
+        if (it == pending_.end()) {
             return;
         }
 
-        std::string action_id = winrt::to_string(args.as<winrt::Windows::UI::Notifications::ToastActivatedEventArgs>().Arguments());
-        try {
-            it->second.callbacks.on_action(action_id);
-        } catch (...) {
-            std::fprintf(stderr, "waty: error: on_action callback threw an exception\n");
+        std::string action_id =
+            winrt::to_string(args.as<winrt::Windows::UI::Notifications::ToastActivatedEventArgs>().Arguments());
+
+        if (!it->second.callbacks.close_on_action) {
+            if (!it->second.callbacks.on_action) {
+                return;
+            }
+            try {
+                it->second.callbacks.on_action(action_id);
+            } catch (...) {
+                std::fprintf(stderr, "waty: error: on_action callback threw an exception\n");
+            }
+            return;
+        }
+
+        // 一次性 action：先摘除 pending，再隐藏 Toast；后续 Activated 会被忽略。
+        pending_entry entry = std::move(it->second);
+        pending_.erase(it);
+        erase_tag_mapping(id);
+        hide_notification(entry);
+
+        if (entry.callbacks.on_action) {
+            try {
+                entry.callbacks.on_action(action_id);
+            } catch (...) {
+                std::fprintf(stderr, "waty: error: on_action callback threw an exception\n");
+            }
+        }
+        if (entry.callbacks.on_closed) {
+            try {
+                entry.callbacks.on_closed(close_reason::action);
+            } catch (...) {
+                std::fprintf(stderr, "waty: error: on_closed callback threw an exception\n");
+            }
+        }
+    }
+
+    void erase_tag_mapping(std::uint64_t id) {
+        for (auto it = tag_to_id_.begin(); it != tag_to_id_.end();) {
+            if (it->second == id) {
+                it = tag_to_id_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
 
@@ -322,6 +362,7 @@ class backend_windows final : public backend {
         }
 
         pending_.erase(it);
+        erase_tag_mapping(id);
     }
 
     std::atomic<std::uint64_t> next_id_{0};

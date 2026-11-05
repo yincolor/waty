@@ -49,6 +49,19 @@ namespace waty::detail
                                   {"message", error.message}};
         }
 
+        const char *notify_close_reason_to_string(waty::notify::close_reason reason)
+        {
+            switch (reason)
+            {
+            case waty::notify::close_reason::expired:   return "expired";
+            case waty::notify::close_reason::dismissed: return "dismissed";
+            case waty::notify::close_reason::replaced:  return "replaced";
+            case waty::notify::close_reason::unknown:   return "unknown";
+            case waty::notify::close_reason::action:    return "action";
+            }
+            return "unknown";
+        }
+
         std::string string_field(const nlohmann::json &obj, const char *key, std::string fallback = {})
         {
             const auto it = obj.find(key);
@@ -78,6 +91,7 @@ namespace waty::detail
         if (op == "send")
         {
             const nlohmann::json options = req.value("options", nlohmann::json::object());
+            const std::uint64_t callback_id = req.value("callbackId", static_cast<std::uint64_t>(0));
 
             waty::notify::notification notification;
             notification.title = string_field(options, "title");
@@ -93,6 +107,10 @@ namespace waty::detail
             if (options.contains("timeout") && options["timeout"].is_number_integer())
             {
                 notification.timeout = std::chrono::milliseconds(options["timeout"].get<long long>());
+            }
+            if (options.contains("closeOnAction") && options["closeOnAction"].is_boolean())
+            {
+                notification.close_on_action = options["closeOnAction"].get<bool>();
             }
             if (options.contains("actions") && options["actions"].is_array())
             {
@@ -117,21 +135,82 @@ namespace waty::detail
             }
             auto *saucer_app = impl.saucer_app;
 
-            notification.on_action = [window, saucer_app](std::string_view action_id) {
+            // 事件里带上内容属性，便于 JS 侧在回调中识别通知。
+            const std::string notify_title = notification.title;
+            const std::string notify_tag   = notification.tag.value_or("");
+            const auto notify_actions      = notification.actions;
+
+            notification.on_action = [window, saucer_app, callback_id, notify_title, notify_tag, notify_actions](
+                                         std::string_view action_id) {
                 const std::string id(action_id);
-                post_to_ui_thread(saucer_app, [window, id] {
-                    if (window) window->emit("notify-action", {{"id", id}});
+                std::string label;
+                for (const auto &action : notify_actions)
+                {
+                    if (action.id == id)
+                    {
+                        label = action.label;
+                        break;
+                    }
+                }
+                post_to_ui_thread(saucer_app, [window, id, label, callback_id, notify_title, notify_tag] {
+                    if (!window)
+                    {
+                        return;
+                    }
+                    window->emit("notify-action", {{"id", id}});
+                    if (callback_id != 0)
+                    {
+                        window->emit("notify-event",
+                                     {{"event", "action"},
+                                      {"callbackId", callback_id},
+                                      {"title", notify_title},
+                                      {"tag", notify_tag},
+                                      {"actionId", id},
+                                      {"label", label}});
+                    }
                 });
             };
-            notification.on_closed = [window, saucer_app](waty::notify::close_reason reason) {
-                post_to_ui_thread(saucer_app, [window, reason] {
-                    if (window) window->emit("notify-closed", {{"reason", static_cast<int>(reason)}});
+            notification.on_closed = [window, saucer_app, callback_id, notify_title, notify_tag](
+                                         waty::notify::close_reason reason) {
+                const int reason_code = static_cast<int>(reason);
+                const char *reason_name = notify_close_reason_to_string(reason);
+                post_to_ui_thread(saucer_app, [window, callback_id, notify_title, notify_tag, reason_code, reason_name] {
+                    if (!window)
+                    {
+                        return;
+                    }
+                    window->emit("notify-closed", {{"reason", reason_code}});
+                    if (callback_id != 0)
+                    {
+                        window->emit("notify-event",
+                                     {{"event", "close"},
+                                      {"callbackId", callback_id},
+                                      {"title", notify_title},
+                                      {"tag", notify_tag},
+                                      {"reason", reason_name},
+                                      {"reasonCode", reason_code}});
+                    }
                 });
             };
-            notification.on_error = [window, saucer_app](const waty::notify::error &error) {
+            notification.on_error = [window, saucer_app, callback_id, notify_title, notify_tag](
+                                        const waty::notify::error &error) {
                 const nlohmann::json data = notify_error_json(error);
-                post_to_ui_thread(saucer_app, [window, data] {
-                    if (window) window->emit("notify-error", data);
+                post_to_ui_thread(saucer_app, [window, callback_id, notify_title, notify_tag, data] {
+                    if (!window)
+                    {
+                        return;
+                    }
+                    window->emit("notify-error", data);
+                    if (callback_id != 0)
+                    {
+                        window->emit("notify-event",
+                                     {{"event", "error"},
+                                      {"callbackId", callback_id},
+                                      {"title", notify_title},
+                                      {"tag", notify_tag},
+                                      {"code", data["code"]},
+                                      {"message", data["message"]}});
+                    }
                 });
             };
 

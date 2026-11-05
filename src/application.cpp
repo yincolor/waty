@@ -9,12 +9,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cassert>
-#include <cctype>
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -27,7 +24,6 @@
 
 #if defined(__linux__)
     #include <fcntl.h>
-    #include <limits.h>
     #include <sys/file.h>
     #include <sys/socket.h>
     #include <sys/un.h>
@@ -36,6 +32,12 @@
 
 namespace waty::detail
 {
+    namespace
+    {
+        std::mutex g_log_mutex;
+        std::unique_ptr<std::ofstream> g_log_stream;
+    } // namespace
+
     void post_to_ui_thread(saucer::application *app, std::function<void()> callback)
     {
         if (!app)
@@ -45,11 +47,82 @@ namespace waty::detail
         app->post(std::move(callback));
     }
 
+    void set_log_file(std::optional<std::string_view> path)
+    {
+        std::unique_ptr<std::ofstream> next;
+        std::string warning;
+
+        if (path && path->empty())
+        {
+            warning = "waty: logFile 为空字符串，已关闭文件日志";
+        }
+        else if (path)
+        {
+            try
+            {
+                std::filesystem::path target(*path);
+                if (target.is_relative())
+                {
+                    target = std::filesystem::path(executable_dir()) / target;
+                }
+
+                if (!target.parent_path().empty())
+                {
+                    std::error_code ec;
+                    std::filesystem::create_directories(target.parent_path(), ec);
+                    if (ec)
+                    {
+                        warning = "waty: 无法创建日志目录 " + target.parent_path().string() +
+                                  " (" + ec.message() + ")，已关闭文件日志";
+                    }
+                }
+
+                if (warning.empty())
+                {
+                    next = std::make_unique<std::ofstream>(target, std::ios::app);
+                    if (!*next)
+                    {
+                        warning = "waty: 无法打开日志文件 " + target.string() + "，已关闭文件日志";
+                        next.reset();
+                    }
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                warning = "waty: 日志文件路径非法: " + std::string(ex.what());
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_log_mutex);
+            g_log_stream = std::move(next);
+        }
+
+        if (!warning.empty())
+        {
+            log_message("warn", warning);
+        }
+    }
+
     void log_message(std::string_view level, std::string_view message)
     {
-        // TODO(doc-gap): 阶段 2 仅控制台输出；ApplicationOptions.logFile 写入后续补齐。
-        std::fprintf(stderr, "[waty][%s] %.*s\n", std::string(level).c_str(),
-                     static_cast<int>(message.size()), message.data());
+        std::string line;
+        line.reserve(level.size() + message.size() + 16);
+        line += "[waty][";
+        line += level;
+        line += "] ";
+        line += message;
+        line += '\n';
+
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        std::fwrite(line.data(), 1, line.size(), stderr);
+        std::fflush(stderr);
+
+        if (g_log_stream && *g_log_stream)
+        {
+            g_log_stream->write(line.data(), static_cast<std::streamsize>(line.size()));
+            g_log_stream->flush();
+        }
     }
 } // namespace waty::detail
 
@@ -67,16 +140,6 @@ namespace waty
             "second-instance",
             "js-error-crash",
         };
-
-        std::string current_working_dir()
-        {
-            char buffer[PATH_MAX];
-            if (::getcwd(buffer, sizeof(buffer)) != nullptr)
-            {
-                return buffer;
-            }
-            return {};
-        }
 
         std::vector<std::string> current_argv()
         {
@@ -106,118 +169,53 @@ namespace waty
             return argv;
         }
 
-        // 目录名严格校验（appName / organizationName 共用）：
-        // 非空、1-64 字符、^[A-Za-z0-9_]+$，且不得为 Windows 保留设备名。
-        bool is_valid_directory_name(std::string_view name)
-        {
-            if (name.empty() || name.size() > 64)
-            {
-                return false;
-            }
-
-            for (const unsigned char c : name)
-            {
-                const bool ok =
-                    (c >= '0' && c <= '9') ||
-                    (c >= 'A' && c <= 'Z') ||
-                    (c >= 'a' && c <= 'z') ||
-                    c == '_';
-                if (!ok)
-                {
-                    return false;
-                }
-            }
-
-            std::string upper;
-            upper.reserve(name.size());
-            for (const unsigned char c : name)
-            {
-                upper.push_back(static_cast<char>(std::toupper(c)));
-            }
-
-            static constexpr std::array<std::string_view, 22> reserved = {
-                "CON", "PRN", "AUX", "NUL",
-                "COM1", "COM2", "COM3", "COM4", "COM5",
-                "COM6", "COM7", "COM8", "COM9",
-                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
-                "LPT6", "LPT7", "LPT8", "LPT9"
-            };
-
-            const std::string_view upper_view(upper);
-            return std::find(reserved.begin(), reserved.end(), upper_view) == reserved.end();
-        }
     } // namespace
-
-    std::string detail::executable_path()
-    {
-#if defined(__linux__)
-        char buffer[PATH_MAX];
-        const auto n = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
-        if (n > 0)
-        {
-            buffer[n] = '\0';
-            return buffer;
-        }
-#endif
-#if defined(_WIN32)
-        // TODO(platform): GetModuleFileNameW 返回完整路径，需转 UTF-8。
-#endif
-#if defined(__APPLE__)
-        // TODO(platform): _NSGetExecutablePath 返回完整路径。
-#endif
-        return {};
-    }
-
-    std::string detail::executable_dir()
-    {
-        const auto exe = detail::executable_path();
-        if (exe.empty())
-        {
-            return std::filesystem::current_path().string();
-        }
-        return std::filesystem::path(exe).parent_path().string();
-    }
 
     Application::Application(const ApplicationOptions &options)
         : m_impl(std::make_unique<Impl>())
     {
-        if (!is_valid_directory_name(options.appName))
+        if (!detail::is_valid_directory_name(options.appName))
         {
-            detail::log_message("error", "waty: ApplicationOptions.appName 非法: '" + std::string(options.appName) + "'");
+            detail::log_message("error", "waty: ApplicationOptions.appName 非法: '" + options.appName + "'");
             throw std::invalid_argument(
-                "waty: ApplicationOptions.appName 必须非空、匹配 ^[A-Za-z0-9_]+$、长度不超过 64，"
+                "waty: ApplicationOptions.appName 必须非空、匹配 ^[A-Za-z0-9_.]+$、长度不超过 64，且不得以 . 开头或结尾，"
                 "且不得为 Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9）。"
-                "实际值: " + std::string(options.appName));
+                "实际值: " + options.appName);
         }
-        if (!is_valid_directory_name(options.organizationName))
+        if (!detail::is_valid_directory_name(options.organizationName))
         {
-            detail::log_message("error", "waty: ApplicationOptions.organizationName 非法: '" + std::string(options.organizationName) + "'");
+            detail::log_message("error", "waty: ApplicationOptions.organizationName 非法: '" + options.organizationName + "'");
             throw std::invalid_argument(
-                "waty: ApplicationOptions.organizationName 必须非空、匹配 ^[A-Za-z0-9_]+$、长度不超过 64，"
+                "waty: ApplicationOptions.organizationName 必须非空、匹配 ^[A-Za-z0-9_.]+$、长度不超过 64，且不得以 . 开头或结尾，"
                 "且不得为 Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9）。"
-                "实际值: " + std::string(options.organizationName));
+                "实际值: " + options.organizationName);
         }
 
-        m_impl->app_name          = std::string(options.appName);
-        m_impl->organization_name = std::string(options.organizationName);
-        m_impl->icon              = std::string(options.icon);
-        m_impl->permissions = options.permissions;
-        if (options.logFile)
-        {
-            m_impl->log_file = std::string(*options.logFile);
-        }
+        m_impl->app_name          = options.appName;
+        m_impl->organization_name = options.organizationName;
+        m_impl->icon              = options.icon;
+        m_impl->permissions       = options.permissions;
         if (options.webviewStoragePath && !options.webviewStoragePath->empty())
         {
-            m_impl->webview_storage_path = std::string(*options.webviewStoragePath);
+            m_impl->webview_storage_path = *options.webviewStoragePath;
         }
+
+        // 文件日志：std::nullopt 表示关闭；空字符串由 set_log_file 记录 warning 后关闭。
+        detail::set_log_file(options.logFile
+                                 ? std::optional<std::string_view>(*options.logFile)
+                                 : std::nullopt);
 
         // Sqlite3 上限校验（见设计文档 §4.5 / §7.1）
         if (options.sqlite3.maxOpenDatabases < 1 || options.sqlite3.maxOpenDatabases > 1024)
         {
             throw std::invalid_argument("waty: ApplicationOptions.sqlite3.maxOpenDatabases 必须在 1..1024 之间");
         }
+
+        m_impl->app_data_dir = path::getPath(SysPath::AppData, options);
+        m_impl->config_dir   = path::getPath(SysPath::Config, options);
+
         // 只保存数据目录与上限：目录与 .db 在首次 open 时才落地。
-        m_impl->sqlite3 = std::make_shared<detail::Sqlite3Service>(getPath(SysPath::AppData),
+        m_impl->sqlite3 = std::make_shared<detail::Sqlite3Service>(m_impl->app_data_dir,
                                                                   options.sqlite3.maxOpenDatabases);
 
         const std::string id = m_impl->app_name;
@@ -264,6 +262,12 @@ namespace waty
     Application::~Application()
     {
         releaseSingleInstanceLock();
+        detail::set_log_file(std::nullopt);
+    }
+
+    void Application::setLogFile(std::optional<std::string_view> path)
+    {
+        detail::set_log_file(path);
     }
 
     void Application::setIcon(std::string_view iconPath)
@@ -441,109 +445,6 @@ namespace waty
         });
     }
 
-    std::string Application::getPath(SysPath path) const
-    {
-        const std::string &name = m_impl->app_name;
-
-#if defined(_WIN32)
-        const char *home_env = std::getenv("USERPROFILE");
-#else
-        const char *home_env = std::getenv("HOME");
-#endif
-        const std::string home = home_env ? home_env : std::string{};
-
-        const auto xdg_config = [&]() -> std::string {
-#if defined(_WIN32)
-            if (const char *v = std::getenv("APPDATA"); v && *v)
-            {
-                return v;
-            }
-            return home + "\\AppData\\Roaming";
-#elif defined(__APPLE__)
-            return home + "/Library/Preferences";
-#else
-            if (const char *v = std::getenv("XDG_CONFIG_HOME"); v && *v && v[0] == '/')
-            {
-                return v;
-            }
-            return home + "/.config";
-#endif
-        };
-        const auto xdg_cache = [&]() -> std::string {
-#if defined(_WIN32)
-            if (const char *v = std::getenv("LOCALAPPDATA"); v && *v)
-            {
-                return v;
-            }
-            return home + "\\AppData\\Local";
-#elif defined(__APPLE__)
-            return home + "/Library/Caches";
-#else
-            if (const char *v = std::getenv("XDG_CACHE_HOME"); v && *v && v[0] == '/')
-            {
-                return v;
-            }
-            return home + "/.cache";
-#endif
-        };
-        const auto xdg_data = [&]() -> std::string {
-#if defined(_WIN32)
-            if (const char *v = std::getenv("LOCALAPPDATA"); v && *v)
-            {
-                return v;
-            }
-            return home + "\\AppData\\Local";
-#elif defined(__APPLE__)
-            return home + "/Library/Application Support";
-#else
-            if (const char *v = std::getenv("XDG_DATA_HOME"); v && *v && v[0] == '/')
-            {
-                return v;
-            }
-            return home + "/.local/share";
-#endif
-        };
-
-        const std::string &org = m_impl->organization_name;
-
-        // 在基础目录下按「组织或发布者 / 应用名」组织用户数据，
-        // 默认组织名为 waty；Windows 使用反斜杠，其余平台使用正斜杠。
-#if defined(_WIN32)
-        constexpr char k_path_sep = '\\';
-#else
-        constexpr char k_path_sep = '/';
-#endif
-        const auto join_app_path = [&](const std::string &base) -> std::string {
-            return base + k_path_sep + org + k_path_sep + name;
-        };
-
-        switch (path)
-        {
-            case SysPath::AppData:    return join_app_path(xdg_data());
-            case SysPath::Config:     return join_app_path(xdg_config());
-            case SysPath::Temp: {
-#if defined(_WIN32)
-                if (const char *v = std::getenv("TEMP"); v && *v) return v;
-                if (const char *v = std::getenv("TMP"); v && *v) return v;
-                return home + "\\AppData\\Local\\Temp";
-#else
-                if (const char *v = std::getenv("TMPDIR"); v && *v)
-                {
-                    return v;
-                }
-                return "/tmp";
-#endif
-            }
-            case SysPath::Downloads: return home + "/Downloads";
-            case SysPath::Documents: return home + "/Documents";
-            case SysPath::Executable: return detail::executable_path();
-            case SysPath::Home:      return home;
-            case SysPath::Cache:     return join_app_path(xdg_cache());
-            case SysPath::Logs:      return join_app_path(xdg_config()) + k_path_sep + "logs";
-        }
-        return {};
-    }
-
     std::optional<std::vector<std::uint8_t>> Application::readEmbeddedFile(std::string_view path) const
     {
         const auto content = detail::find_embedded_resource(path);
@@ -564,7 +465,7 @@ namespace waty
         }
 
 #if defined(__linux__)
-        const std::string user_data = getPath(SysPath::Config);
+        const std::string user_data = m_impl->config_dir;
         std::error_code ec;
         std::filesystem::create_directories(user_data, ec);
 
@@ -764,7 +665,14 @@ namespace waty
 
         nlohmann::json message;
         message["argv"] = current_argv();
-        message["cwd"]  = current_working_dir();
+        try
+        {
+            message["cwd"] = path::cwd();
+        }
+        catch (...)
+        {
+            message["cwd"] = "";
+        }
         const auto data = message.dump();
         ::write(cfd, data.data(), data.size());
         ::close(cfd);

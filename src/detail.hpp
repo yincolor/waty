@@ -6,6 +6,8 @@
 #include <waty/detail/embedded.hpp>
 #include <waty/web_window.hpp>
 
+#include "path_internal.hpp"
+
 #include <saucer/app.hpp>
 #include <saucer/icon.hpp>
 #include <saucer/scheme.hpp>
@@ -162,6 +164,8 @@ namespace waty
         saucer::application *saucer_app = nullptr;
         WindowId id                = 0;
         PermissionOptions permissions;
+        std::string app_name;
+        std::string organization_name;
 
         // 选项拷贝（string_view 生命周期由内部保证）
         std::string title;
@@ -219,6 +223,11 @@ namespace waty
         // JS 桥是否已注入
         bool bridge_ready = false;
 
+        // JS 侧 cwd 缓存（每轮事件循环刷新；见 js_bridge.cpp）
+        std::string js_cwd;
+        std::string js_cwd_error;
+        Subscription cwd_subscription;
+
         // Sqlite3 服务（由 Application 下发，窗口与 App 共享同一实例）
         std::shared_ptr<detail::Sqlite3Service> sqlite3;
     };
@@ -235,7 +244,8 @@ namespace waty
         std::string app_name;
         std::string organization_name;
         std::string icon;
-        std::optional<std::string> log_file;
+        std::string app_data_dir;
+        std::string config_dir;
         std::optional<std::string> webview_storage_path;
         PermissionOptions permissions;
 
@@ -290,9 +300,10 @@ namespace waty::detail
     void handle_sqlite3_request(WebWindow::Impl &impl, const nlohmann::json &request);
     void handle_notify_request(WebWindow::Impl &impl, const nlohmann::json &request);
 
+    // application.cpp：全局日志 sink（线程安全）
+    void set_log_file(std::optional<std::string_view> path);
+
     // web_window.cpp：图标路径解析（先查嵌入资源，再查可执行文件目录）
-    std::string executable_path();
-    std::string executable_dir();
     std::optional<saucer::icon> resolve_icon(std::string_view path);
 
     // web_window.cpp：应用窗口图标（GTK 后端通过 gdk_toplevel_set_icon_list 设置）

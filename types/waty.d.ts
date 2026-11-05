@@ -1,4 +1,65 @@
 // waty TypeScript 全局声明（对应文档第 10 章）。
+
+type WatyPathKey =
+    | 'appData'
+    | 'config'
+    | 'temp'
+    | 'downloads'
+    | 'documents'
+    | 'executable'
+    | 'home'
+    | 'cache'
+    | 'logs';
+
+interface WatyPath {
+    readonly sep: string;
+    readonly delimiter: string;
+    cwd(): string;
+    normalize(path: string): string;
+    join(...parts: string[]): string;
+    resolve(...parts: string[]): string;
+    basename(path: string, ext?: string): string;
+    dirname(path: string): string;
+    extname(path: string): string;
+    isAbsolute(path: string): boolean;
+    getPath(path: WatyPathKey): string;
+}
+
+interface WatyNotifyActionEvent {
+    event: 'action';
+    callbackId: number;
+    title: string;
+    tag: string;
+    actionId: string;
+    label: string;
+}
+
+interface WatyNotifyCloseEvent {
+    event: 'close';
+    callbackId: number;
+    title: string;
+    tag: string;
+    reason: 'expired' | 'dismissed' | 'replaced' | 'unknown' | 'action';
+    reasonCode: number;
+}
+
+interface WatyNotifyErrorEvent {
+    event: 'error';
+    callbackId: number;
+    title: string;
+    tag: string;
+    code: string;
+    message: string;
+}
+
+type WatyNotifyEvent = WatyNotifyActionEvent | WatyNotifyCloseEvent | WatyNotifyErrorEvent;
+
+interface WatyNotifyHandlers {
+    onAction?: (event: WatyNotifyActionEvent) => void;
+    onClose?: (event: WatyNotifyCloseEvent) => void;
+    onError?: (event: WatyNotifyErrorEvent) => void;
+}
+
 declare global {
     interface Window {
         waty: {
@@ -14,10 +75,9 @@ declare global {
             };
             os?: {
                 platform(): Promise<'win32' | 'darwin' | 'linux'>;
-                arch(): Promise<'x64' | 'arm64'>;
-                homedir(): Promise<string>;
-                getPath(path: 'appData' | 'config' | 'temp' | 'downloads' | 'documents' | 'executable' | 'home' | 'cache' | 'logs'): Promise<string>;
+                arch(): Promise<'x64' | 'arm64' | 'unknown'>;
             };
+            path?: WatyPath;
             fs?: {
                 readFile(path: string): Promise<Uint8Array>;
                 writeFile(path: string, data: Uint8Array): Promise<void>;
@@ -79,14 +139,18 @@ declare global {
                 openDatabase(dbName: string, version: string): Promise<WatyDatabase>;
             };
             notify?: {
-                send(options: {
-                    title: string;
-                    body?: string;
-                    icon?: string;
-                    actions?: Array<{ id: string; label: string }>;
-                    timeout?: number;
-                    tag?: string;
-                }): Promise<{ ok: boolean }>;
+                send(
+                    options: {
+                        title: string;
+                        body?: string;
+                        icon?: string;
+                        actions?: Array<{ id: string; label: string }>;
+                        timeout?: number;
+                        tag?: string;
+                        closeOnAction?: boolean;
+                    },
+                    callbackOrHandlers?: ((event: WatyNotifyEvent) => void) | WatyNotifyHandlers
+                ): Promise<{ ok: boolean }>;
                 hasPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
                 requestPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
             };

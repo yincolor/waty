@@ -29,7 +29,8 @@ namespace waty
     struct PermissionOptions
     {
         bool ipc      = true;   // IPC 是基础能力，默认开启的例外
-        bool os       = false;  // 是否启用 os 模块（含 getPath）
+        bool os       = false;  // 是否启用 os 模块（platform / arch）
+        bool path     = false;  // 是否启用 window.waty.path（路径工具 / getPath / resolve）
         bool window   = false;  // 是否启用 JS 窗口控制
         bool devtools = false;  // 是否允许打开 DevTools
         bool log      = false;  // 是否转发 JS console 到 C++ 日志
@@ -43,17 +44,21 @@ namespace waty
     /// 应用配置（见文档 6.3）
     struct ApplicationOptions
     {
-        std::string_view appName;  // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_]+$，1-64 字符）
-        std::string_view organizationName = "waty";  // 组织或发布者名称；用于用户数据目录拼接；校验同 appName
-        std::string_view icon;     // 图标路径；留空则使用系统默认图标
-        std::optional<std::string_view> logFile;  // 日志文件路径
+        std::string appName;  // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_.]+$，1-64 字符，不得以 . 开头/结尾）
+        std::string organizationName = "waty";  // 组织或发布者名称；用于用户数据目录拼接；校验同 appName，支持 google.com 形式
+        std::string icon;     // 图标路径；留空则使用系统默认图标
+
+        // 日志文件路径。
+        // std::nullopt（或不赋值）= 关闭文件日志；空字符串视为关闭并记录 warning。
+        // 相对路径基于可执行文件目录解析；文件以追加方式打开。
+        std::optional<std::string> logFile;
 
         // WebView 运行时数据目录。
-        // 留空时默认使用 getPath(SysPath::AppData) / "webview"。
+        // 留空时默认使用 waty::path::getPath(SysPath::AppData) / "webview"。
         // Linux: $XDG_DATA_HOME/<organizationName>/<appName>/webview，默认 ~/.local/share/waty/<appName>/webview。
         // Windows: %LOCALAPPDATA%\<organizationName>\<appName>\WebView2。
         // macOS: ~/Library/Application Support/<organizationName>/<appName>/WebView。
-        std::optional<std::string_view> webviewStoragePath;
+        std::optional<std::string> webviewStoragePath;
 
         Sqlite3Options sqlite3;
 

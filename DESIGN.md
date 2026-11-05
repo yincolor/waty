@@ -1,4 +1,4 @@
-# Waty 项目文档 v3.5.0
+# Waty 项目文档 v0.1.0
 
 > 基于 Saucer + C++23 + CMake 的轻量级桌面应用框架，提供类似 Electron 的开发体验。
 
@@ -91,7 +91,7 @@ include(FetchContent)
 
 FetchContent_Declare(waty
     GIT_REPOSITORY https://github.com/yourname/waty.git
-    GIT_TAG v3.5.0)          # 固定版本 tag，避免 main 分支不稳定
+    GIT_TAG v0.1.0)          # 固定版本 tag，避免 main 分支不稳定
 FetchContent_MakeAvailable(waty)
 
 add_executable(my_app main.cpp)
@@ -137,13 +137,17 @@ int main() {
     waty::ApplicationOptions appOpts;
     appOpts.appName = "My_App";
     appOpts.icon = "assets/icon.png";          // 可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径
-    appOpts.permissions.os = true;             // 启用 JS 系统信息 + getPath
+    appOpts.permissions.os = true;             // 启用 JS 系统信息（platform / arch）
+    appOpts.permissions.path = true;           // 启用 window.waty.path（路径工具 / getPath / resolve）
     appOpts.permissions.dialog = true;         // 启用 JS 原生对话框
     appOpts.permissions.fs.read = true;        // 启用 JS 文件读取
     appOpts.permissions.fs.write = false;      // 默认关闭写
     appOpts.permissions.sqlite3 = true;        // 启用 window.waty.sqlite3
     appOpts.sqlite3.maxOpenDatabases = 64;     // 可选，默认 64，范围 1..1024
-    appOpts.logFile = "/home/user/data/app.log"; // 建议绝对路径，可用 getPath 拼接
+    // logFile 为 std::optional<std::string>：std::nullopt 表示关闭；
+    // 相对路径基于可执行文件目录；空字符串视为关闭并记录 warning。
+    appOpts.logFile = waty::path::join(
+        waty::path::getPath(waty::SysPath::Logs, appOpts), "app.log");
 
     waty::Application app(appOpts);
 
@@ -289,7 +293,8 @@ struct FsPermissionOptions {
 ```cpp
 struct PermissionOptions {
     bool ipc = true;           // IPC 是基础能力，默认开启的例外
-    bool os = false;           // 是否启用 os 模块（含 getPath）
+    bool os = false;           // 是否启用 os 模块（platform / arch）
+    bool path = false;         // 是否启用 window.waty.path（路径工具 / getPath / resolve）
     bool window = false;       // 是否启用 JS 窗口控制
     bool devtools = false;     // 是否允许打开 DevTools
     bool log = false;          // 是否转发 JS console 到 C++ 日志
@@ -300,7 +305,7 @@ struct PermissionOptions {
 };
 ```
 
-> `dialog` / `sqlite3` / `notify` 权限默认关闭，与 `os`、`window` 的权限模型保持一致。
+> `dialog` / `sqlite3` / `notify` / `path` 权限默认关闭，与 `os`、`window` 的权限模型保持一致。
 
 ### 6.2.1 Sqlite3Options
 
@@ -317,39 +322,45 @@ struct Sqlite3Options {
 
 ```cpp
 struct ApplicationOptions {
-    std::string_view appName;                 // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_]+$，1-64 字符）
-    std::string_view organizationName = "waty"; // 组织或发布者名称；用于用户数据目录拼接；校验同 appName
-    std::string_view icon;                    // 图标路径，可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径；留空则应用无自定义图标，使用系统默认图标。
-    std::optional<std::string_view> logFile;  // 日志文件路径。相对路径相对于可执行文件目录；规范上建议传绝对路径，可用 getPath 拼接
+    std::string appName;                 // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_.]+$，1-64 字符，不得以 . 开头/结尾）
+    std::string organizationName = "waty"; // 组织或发布者名称；用于用户数据目录拼接；校验同 appName
+    std::string icon;                    // 图标路径，可指向嵌入资源中的相对路径，或相对于可执行文件目录的文件系统路径；留空则应用无自定义图标，使用系统默认图标。
 
-    // WebView 运行时数据目录。留空时默认使用 getPath(SysPath::AppData) / "webview"。
+    // 日志文件路径。
+    // std::nullopt（或不赋值）= 关闭文件日志；空字符串视为关闭并记录 warning。
+    // 相对路径基于可执行文件目录；文件以追加方式打开。
+    std::optional<std::string> logFile;
+
+    // WebView 运行时数据目录。留空时默认使用 waty::path::getPath(SysPath::AppData) / "webview"。
     // Linux: $XDG_DATA_HOME/<organizationName>/<appName>/webview，默认 ~/.local/share/waty/<appName>/webview。
     // Windows: %LOCALAPPDATA%\<organizationName>\<appName>\WebView2。
     // macOS: ~/Library/Application Support/<organizationName>/<appName>/WebView。
-    std::optional<std::string_view> webviewStoragePath;
+    std::optional<std::string> webviewStoragePath;
 
     Sqlite3Options sqlite3;                   // Sqlite3 资源上限（是否启用见 permissions.sqlite3）
     PermissionOptions permissions;            // JS 权限配置
 };
 ```
 
-> **字符串生命周期**：所有 `std::string_view` 字段在内部会立即拷贝为 `std::string`，调用者无需担心生命周期问题。
+> **字符串生命周期**：`appName` / `organizationName` / `icon` 为 owned `std::string`，`logFile` / `webviewStoragePath` 为 `std::optional<std::string>`；调用者无需担心生命周期问题。
 
 > **`appName` 校验规则**：
 >
 > `ApplicationOptions.appName` 会参与用户数据目录路径拼接，必须满足以下条件：
 >
 > - 非空；
-> - 仅允许数字 `0-9`、英文字母 `A-Z` / `a-z`、下划线 `_`；
-> - 必须匹配正则 `^[A-Za-z0-9_]+$`；
-> - 建议长度不超过 64；
-> - 不得为 Windows 保留设备名（大小写不敏感）：`CON`、`PRN`、`AUX`、`NUL`、`COM1`–`COM9`、`LPT1`–`LPT9`。
+> - 仅允许数字 `0-9`、英文字母 `A-Z` / `a-z`、下划线 `_`、点 `.`；
+> - 必须匹配正则 `^[A-Za-z0-9_.]+$`；
+> - 长度 1–64；
+> - 不得以 `.` 开头或结尾（因此也排除了 `.` / `..`）；
+> - 不得为 Windows 保留设备名（大小写不敏感）：`CON`、`PRN`、`AUX`、`NUL`、`COM1`–`COM9`、`LPT1`–`LPT9`；带扩展名形式同样拒绝（如 `CON.txt`）。
+> - 允许域名形式，例如 `google.com`、`com.example.app`。
 >
 > 非法时，`Application` 构造函数抛出 `std::invalid_argument`，异常信息包含规则说明与实际传入值。
 >
 > 若未来需要支持中文、空格、连字符等友好显示名，应新增独立的显示名字段，而不是放宽 `appName`。
 
-> **`organizationName` 校验规则**：与 `appName` 完全一致（非空、`^[A-Za-z0-9_]+$`、1-64 字符、拒绝 Windows 保留设备名）。`organizationName` 默认值为 `waty`，并参与用户数据目录路径拼接。非法时 `Application` 构造函数同样抛出 `std::invalid_argument`。
+> **`organizationName` 校验规则**：与 `appName` 完全一致（非空、`^[A-Za-z0-9_.]+$`、1–64 字符、不得以 `.` 开头/结尾、拒绝 Windows 保留设备名）。`organizationName` 默认值为 `waty`，并参与用户数据目录路径拼接；支持 `google.com` 这类域名形式。非法时 `Application` 构造函数同样抛出 `std::invalid_argument`。
 
 > **`webviewStoragePath` 说明**：`webviewStoragePath` 在内部会立即拷贝为 `std::string`，调用者无需担心生命周期。若显式设置，Waty 不再自动推导路径；若路径父目录创建失败，记录警告并回退 Saucer 默认行为。
 
@@ -516,7 +527,7 @@ Waty 的线程模型与 Saucer 一致，核心规则只有三条：
 | `app.quit` / `app.run` | UI 线程 | 事件循环相关 |
 | `app.on` 回调 | UI 线程 | 应用事件 |
 | `app.onEventLoopTick` 回调 | UI 线程 | 每轮事件循环执行一次 |
-| `app.getPath` | 任意线程 | 建议实现为线程安全 |
+| `waty::path::getPath` / `waty::path::cwd` | 任意线程 | 读取环境变量 / 当前工作目录；无共享可变状态 |
 | `app.getWindow / app.windows` |任意线程| 建议加锁返回快照 |
 | `app.setIcon` | UI 线程 | 操作原生窗口 |
 | `ww->loadFile` / `loadURL` | UI 线程 | 操作 WebView |
@@ -674,8 +685,8 @@ public:
     // 运行事件循环，返回进程退出码，通常为 0；非 0 表示异常退出
     int run();
 
-    // 应用路径
-    std::string getPath(SysPath path) const;
+    // 设置/切换文件日志。std::nullopt 关闭；空字符串视为关闭并记录 warning。
+    void setLogFile(std::optional<std::string_view> path);
 
     // 读取嵌入资源字节；path 为相对嵌入根目录的路径（如 "assets/icon.png"）。
     // 未找到对应资源时返回 std::nullopt；否则返回原始字节副本（std::vector<std::uint8_t>）。
@@ -737,43 +748,85 @@ app.on("window-all-closed", [&](waty::Event& e, const nlohmann::json&) {
 
 第二实例不会自动退出，由使用者决定后续行为（例如激活已有窗口）。标准做法是 `requestSingleInstanceLock()` 返回 `false` 后立即 `app.quit()`。
 
-#### 7.3.2 应用路径 API
+#### 7.3.2 路径模块 API（`waty::path`）
+
+路径功能独立于 `Application`，位于 `<waty/paths.hpp>`：
 
 ```cpp
+#include <waty/paths.hpp>
+
 enum class SysPath {
     AppData,      // XDG_DATA_HOME/<organizationName>/<appName>/
-    Config,       // XDG_CONFIG_HOME/<organizationName>/<appName>/，原 UserData
+    Config,       // XDG_CONFIG_HOME/<organizationName>/<appName>/
     Temp,
     Downloads,
     Documents,
-    Executable,   // 可执行文件完整路径（含文件名），原 AppDir
+    Executable,   // 可执行文件完整路径（含文件名）
     Home,
     Cache,        // XDG_CACHE_HOME/<organizationName>/<appName>/
     Logs,
-
-    // deprecated aliases（保留源码兼容）
-    UserData = Config,
-    AppDir = Executable,
 };
 
-std::string Application::getPath(SysPath path) const;
+namespace waty::path {
+    char sep() noexcept;
+    std::string_view delimiter() noexcept;
+    std::string cwd();
+    std::string normalize(std::string_view value);
+    std::string join(std::initializer_list<std::string_view> parts);
+    std::string resolve(std::initializer_list<std::string_view> parts);
+    std::string basename(std::string_view value, std::string_view ext = {});
+    std::string dirname(std::string_view value);
+    std::string extname(std::string_view value);
+    bool isAbsolute(std::string_view value);
+
+    std::string getPath(SysPath path);
+    std::string getPath(SysPath path, std::string_view organizationName, std::string_view appName);
+    std::string getPath(SysPath path, const ApplicationOptions &options);
+}
 ```
 
-JS 侧对应 `window.waty.os.getPath(...)`，受 `permissions.os` 控制，且为异步 API。
+**语义：**
 
-`Application::getPath` 在 C++ 侧不受 `permissions.os` 影响；该权限仅控制 JS 侧 `window.waty.os` 是否可用。
+- C++ 侧使用 `std::filesystem` 的**词法**语义；不要求路径存在，不解析符号链接。
+- 所有返回字符串均为 UTF-8。
+- `normalize("")`、`join()`、`join("")` 返回 `"."`。
+- `join` 等价于依次执行 `std::filesystem::operator/`，再执行 `lexically_normal()`。
+  - 绝对段会丢弃其左侧内容：`join("/a", "/b") == "/b"`。
+  - 空段保留分隔符：`join("a", "") == "a/"`。
+- `resolve` 从右向左查找绝对段，最后相对 `cwd()` 解析并规范化；空参数或空字符串返回 `cwd()`。
+  - 结果会去掉末尾分隔符（根目录除外），因此 `resolve("a", "..") == cwd()`。
+- `dirname` 空结果统一返回 `"."`；`dirname("a/") == "a"`（文件系统语义，不是 Node 的 `"."`）。
+- `basename` / `dirname` / `extname` 的边界行为与 `std::filesystem::path` 一致。
+- 所有路径函数拒绝 URL scheme（`http://`、`https://`、`file://`、`embedded://` 等），抛出 `PathError{PATH_INVALID_ARGUMENT}`。
+
+**平台映射：**
 
 | `SysPath` | Linux | Windows | macOS |
 |---|---|---|---|
-| `AppData` | `$XDG_DATA_HOME/<organizationName>/<appName>`，默认 `~/.local/share/waty/<appName>` | `%LOCALAPPDATA%\<organizationName>\<appName>` | `~/Library/Application Support/<organizationName>/<appName>` |
-| `Config` | `$XDG_CONFIG_HOME/<organizationName>/<appName>`，默认 `~/.config/waty/<appName>` | `%APPDATA%\<organizationName>\<appName>` | `~/Library/Preferences/<organizationName>/<appName>` |
-| `Executable` | `/proc/self/exe` 解析后的完整路径 | `GetModuleFileNameW` 返回的完整路径 | `_NSGetExecutablePath` / `NSBundle` 返回的完整路径 |
+| `AppData` | `$XDG_DATA_HOME/<organizationName>/<appName>`，默认 `~/.local/share/<organizationName>/<appName>` | `%LOCALAPPDATA%\<organizationName>\<appName>` | `~/Library/Application Support/<organizationName>/<appName>` |
+| `Config` | `$XDG_CONFIG_HOME/<organizationName>/<appName>`，默认 `~/.config/<organizationName>/<appName>` | `%APPDATA%\<organizationName>\<appName>` | `~/Library/Preferences/<organizationName>/<appName>` |
+| `Cache` | `$XDG_CACHE_HOME/<organizationName>/<appName>`，默认 `~/.cache/<organizationName>/<appName>` | `%LOCALAPPDATA%\<organizationName>\<appName>` | `~/Library/Caches/<organizationName>/<appName>` |
+| `Logs` | `Config/logs` | `Config\logs` | `Config/logs` |
+| `Executable` | `/proc/self/exe` 解析后的完整路径 | `GetModuleFileNameW` 返回的完整路径 | `_NSGetExecutablePath` 返回的完整路径 |
+| `Home` | `$HOME` / `getpwuid` | `%USERPROFILE%` / `%HOMEDRIVE%%HOMEPATH%` | `$HOME` / `getpwuid` |
+| `Temp` | `$TMPDIR` 或 `/tmp` | `%TEMP%` / `%TMP%` | `$TMPDIR` 或 `/tmp` |
+| `Downloads` / `Documents` | `Home/Downloads` / `Home/Documents` | `Home\Downloads` / `Home\Documents` | `Home/Downloads` / `Home/Documents` |
 
-> `SysPath::Config` 对应原 `UserData`，因为其 Linux 实现返回 `XDG_CONFIG_HOME` 下的路径。
-> `SysPath::Executable` 对应原 `AppDir`，但语义从“应用目录”改为“可执行文件完整路径（含文件名）”。
-> `Executable` 在应用启动时获取并缓存；获取失败时返回空字符串并记录警告。
-> `AppData` 是 XDG 数据目录，不等同于 Electron 的 `appData`。Electron 的 `userData` 在 Linux 上对应本项目的 `Config`。
-> 由于 `appName` 已通过严格校验，不会出现路径穿越、非法字符或平台保留名问题。
+**`getPath` 规则：**
+
+- `AppData` / `Config` / `Cache` / `Logs` 是应用级路径，必须提供合法的 `organizationName` / `appName`。
+- 单参数重载只接受非应用级路径；对应用级路径调用会抛出 `PathError{PATH_INVALID_ARGUMENT}`。
+- `Executable`、`Home` 等路径不可用时抛出 `PathError{PATH_NOT_AVAILABLE}`，不再静默返回空字符串。
+- `XDG_*` 环境变量必须是绝对路径，否则回退到默认目录。
+- 已移除 deprecated 的 `SysPath::UserData` / `SysPath::AppDir`；v0.1.0 不保留历史兼容别名。
+- C++ 侧 `waty::path` **不受** `permissions.path` 影响；该权限只控制 JS 侧模块是否挂载。
+
+**JS 侧：**
+
+- `window.waty.path` 是**同步** API，受 `permissions.path` 控制。
+- `path.cwd()` 返回 C++ 每轮事件循环刷新到 JS 的 cwd 缓存；外部直接调用 `chdir` 后最多有一个事件循环 tick 的延迟。
+- `path.resolve` 使用同一个 cwd 缓存；因此它是同步的，但不可能比缓存更新。
+- 路径函数抛 `WatyPathError`，`code` 为 `PATH_INVALID_ARGUMENT` / `PATH_NOT_AVAILABLE`；非字符串入参抛 `TypeError`。
 
 ### 7.3.3 事件循环任务（`onEventLoopTick`）
 
@@ -972,6 +1025,7 @@ waty::notify::notification n;
 n.title   = "下载完成";
 n.body    = "movie.mp4 已保存";
 n.timeout = std::chrono::milliseconds(5000);
+n.close_on_action = true;  // 默认 true：点击任一按钮后关闭通知并忽略后续 action
 n.actions = {
     {.id = "open", .label = "打开"},
     {.id = "folder", .label = "打开文件夹"},
@@ -990,10 +1044,10 @@ if (auto r = waty::notify::send(std::move(n)); !r) {
 
 | 类型 | 说明 |
 |---|---|
-| `notification` | 通知内容 + 回调；move-only，可用 designated initializers 构造 |
+| `notification` | 通知内容 + 回调；move-only，可用 designated initializers 构造；`close_on_action` 默认 `true` |
 | `action` | `{ id, label }`，按钮，上限 3 个 |
 | `permission_status` | `not_determined` / `granted` / `denied` / `provisional` / `unsupported` |
-| `close_reason` | `expired` / `dismissed` / `replaced` / `unknown` |
+| `close_reason` | `expired` / `dismissed` / `replaced` / `unknown` / `action` |
 | `errc` | `invalid_argument` / `permission_denied` / `not_supported` / `backend_unavailable` / `io_error` / `unknown` |
 
 **权限接口：**
@@ -1067,6 +1121,7 @@ tray->show();
 |---|---|---|
 | `window.waty.ipc` | `permissions.ipc`（默认 `true`） | 8.1 |
 | `window.waty.os` | `permissions.os` | 8.2 |
+| `window.waty.path` | `permissions.path` | 8.2 |
 | `window.waty.fs` | `permissions.fs.read` / `.write` | 8.3 |
 | `window.waty.window` | `permissions.window` / `.devtools` | 8.4 |
 | `window.waty.dialog` | `permissions.dialog` | 8.5 |
@@ -1166,30 +1221,52 @@ C++ 侧提供 `waty::IpcError`，普通异常映射：
 - 其他未捕获异常 → `IPC_HANDLER_EXCEPTION`
 - details 由 waty::IpcError 自定义填充，普通异常时为空
 
-### 8.2 OS（需 `permissions.os = true`）
+### 8.2 OS 与 Path（需 `permissions.os` / `permissions.path`）
 
-所有 `os` 方法均为**异步**，返回 Promise。
+#### 8.2.1 OS（需 `permissions.os = true`）
+
+`os` 方法均为**异步**，返回 Promise：
 
 ```js
 await window.waty.os.platform(); // 'win32' | 'darwin' | 'linux'
-await window.waty.os.arch();     // 'x64' | 'arm64' | ...
-await window.waty.os.homedir();  // '/home/username/'
-
-// 应用路径
-await window.waty.os.getPath("appData");
-await window.waty.os.getPath("config");
-await window.waty.os.getPath("temp");
-await window.waty.os.getPath("downloads");
-await window.waty.os.getPath("documents");
-await window.waty.os.getPath("executable");
-await window.waty.os.getPath("home");
-await window.waty.os.getPath("cache");
-await window.waty.os.getPath("logs");
+await window.waty.os.arch();     // 'x64' | 'arm64' | 'unknown'
 ```
 
-- `"config"` 替代旧 `"userData"`，Linux 下返回 `~/.config/<organizationName>/<appName>`（默认 `~/.config/waty/<appName>`）。
-- `"executable"` 替代旧 `"appDir"`，返回可执行文件完整路径（含文件名）。
-- 旧值 `"userData"` / `"appDir"` 仍可用，但已废弃，C++ 侧会记录 deprecated 警告并映射到 `config` / `executable`。
+`os` 不再提供 `homedir()` / `getPath()`；所有路径功能统一迁移到 `window.waty.path`。
+
+#### 8.2.2 Path（需 `permissions.path = true`）
+
+`window.waty.path` 是**同步**模块，不经过 IPC，不返回 Promise。未开启权限时该模块为 `undefined`。
+
+```js
+const p = window.waty.path;
+
+p.sep;          // '/' 或 '\\'
+p.delimiter;    // ':' 或 ';'
+p.cwd();        // 当前工作目录（同步缓存）
+p.normalize("a/b/..");      // "a/"
+p.join("/a", "/b");         // "/b"
+p.join("a", "");            // "a/"
+p.resolve("a", "..");       // cwd
+p.basename("a.txt", ".txt");// "a"
+p.dirname("a");             // "."
+p.dirname("a/");            // "a"
+p.extname("a.txt");         // ".txt"
+p.isAbsolute("/a");         // true
+
+for (const key of [
+    "appData", "config", "temp", "downloads", "documents",
+    "executable", "home", "cache", "logs",
+]) {
+    p.getPath(key);
+}
+```
+
+- `getPath` 是同步方法；应用级路径需要 C++ 侧已配置合法的 `organizationName` / `appName`。
+- 路径不可用时同步抛出 `WatyPathError`，`code` 为 `PATH_NOT_AVAILABLE`；非法参数为 `PATH_INVALID_ARGUMENT`；非字符串入参抛 `TypeError`。
+- `cwd()` / `resolve()` 使用每轮事件循环从 C++ 刷新的缓存。外部直接调用 `chdir` 后最多有一个事件循环 tick 的延迟。
+- 路径表在窗口创建时生成；环境变量变化不会自动刷新，`cwd` 除外。
+- 路径模块拒绝 URL scheme（`http://`、`file://`、`embedded://` 等）。
 
 ### 8.3 FS（需 `permissions.fs.read` / `permissions.fs.write`）
 
@@ -1537,32 +1614,99 @@ await db.close();
 
 `window.waty.notify` 提供系统通知能力，对应 C++ 侧的 `waty::notify` 模块（见 7.6）。
 
-```js
-// 发送通知
-const { ok } = await window.waty.notify.send({
-    title: "下载完成",        // 必填
-    body: "movie.mp4 已保存", // 可选
-    icon: "assets/icon.png",  // 可选，本地路径或 file:// URI
-    actions: [                // 可选，按钮，上限 3
-        { id: "open", label: "打开" },
-        { id: "folder", label: "打开文件夹" }
-    ],
-    timeout: 5000,            // 可选，毫秒；不填用系统默认
-    tag: "msg-1"              // 可选，替换键（同 tag 后发覆盖先发）
-});
+`send(options, callbackOrHandlers?)` 支持两种可选的第二参数：
 
-// 权限
+1. 事件回调函数：接收该通知的**所有** action / close / error 事件。
+2. 结构化 handlers 对象：按事件类型分别注册 `onAction` / `onClose` / `onError`。
+
+两种形式都与具体一次 `send` 绑定，不需要使用全局 `ipc.on` 做关联。
+
+#### 8.7.1 单回调形式
+
+```js
+const { ok } = await window.waty.notify.send(
+    {
+        title: "下载完成",        // 必填
+        body: "movie.mp4 已保存", // 可选
+        icon: "assets/icon.png",  // 可选，本地路径或 file:// URI
+        actions: [                // 可选，按钮，上限 3
+            { id: "open", label: "打开" },
+            { id: "folder", label: "打开文件夹" }
+        ],
+        timeout: 5000,            // 可选，毫秒；不填用系统默认
+        tag: "msg-1",             // 可选，替换键（同 tag 后发覆盖先发）
+        closeOnAction: true       // 可选，默认 true：点击按钮后关闭并忽略后续 action
+    },
+    (event) => {
+        switch (event.event) {
+            case "action":
+                console.log("点击按钮", event.actionId, event.label);
+                break;
+            case "close":
+                console.log("通知关闭", event.reason, event.reasonCode);
+                break;
+            case "error":
+                console.error("异步投递失败", event.code, event.message);
+                break;
+        }
+    }
+);
+```
+
+#### 8.7.2 结构化 handlers 形式
+
+```js
+await window.waty.notify.send(
+    { title: "下载完成", actions: [{ id: "open", label: "打开" }] },
+    {
+        onAction(event) { console.log(event.actionId); },
+        onClose(event)  { console.log(event.reason); },
+        onError(event)  { console.error(event.code, event.message); }
+    }
+);
+```
+
+- handlers 对象中至少需要提供 `onAction` / `onClose` / `onError` 之一。
+- 未提供的 handler 对应事件会被忽略，但 `close` / `error` 仍会结束该回调的生命周期。
+- 第二个参数为 `null` / `undefined` 时不注册回调，行为与旧版 `send(options)` 完全一致。
+- 第二个参数不是函数、也不是合法 handlers 对象时，返回 rejected Promise，错误为 `TypeError`。
+
+#### 8.7.3 事件对象
+
+所有事件都包含公共字段：`callbackId`（内部关联 ID）、`title`、`tag`。
+
+| `event` | 额外字段 | 触发时机 |
+|---|---|---|
+| `"action"` | `actionId`、`label` | 用户点击通知按钮；默认只触发一次，随后关闭 |
+| `"close"` | `reason`、`reasonCode` | 通知关闭；`reason` 为 `expired` / `dismissed` / `replaced` / `unknown` / `action` |
+| `"error"` | `code`、`message` | 异步投递错误 |
+
+生命周期：
+
+- 默认 `closeOnAction = true`：首次 `action` 后库立即关闭通知、触发 `close`（`reason = "action"`），并忽略后续 `action`；回调在 `close` 时移除。
+- 显式设置 `closeOnAction = false` 时，通知保持打开，`action` 可多次触发，回调保留到 `close` / `error`。
+- `close` / `error` 触发后，该 `callbackId` 对应的回调自动移除。
+- `send()` 的同步参数校验失败只 reject Promise，不触发事件回调。
+- `close` 与 `error` 谁先到达，谁结束回调；之后的事件会被忽略。
+
+#### 8.7.4 兼容事件
+
+旧的全局事件继续保留，适合只需要一个全局日志/监控入口的场景：
+
+```js
+waty.ipc.on("notify-action", ({ id }) => { /* 默认仅首次 action */ });
+waty.ipc.on("notify-closed", ({ reason }) => { /* 0=expired 1=dismissed 2=replaced 3=unknown 4=action */ });
+waty.ipc.on("notify-error", ({ code, message }) => {});
+```
+
+> 单回调 / handlers 是 per-send 关联的推荐方式；全局事件是兼容层，不会自动按通知过滤。
+
+#### 8.7.5 权限与错误
+
+```js
 const status = await window.waty.notify.hasPermission();
 // 'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'
 await window.waty.notify.requestPermission();
-```
-
-**事件**（通过 `window.waty.ipc.on` 订阅）：
-
-```js
-waty.ipc.on("notify-action", ({ id }) => { /* 用户点击了按钮 id */ });
-waty.ipc.on("notify-closed", ({ reason }) => { /* 0=expired 1=dismissed 2=replaced 3=unknown */ });
-waty.ipc.on("notify-error", ({ code, message }) => { /* 异步投递错误 */ });
 ```
 
 **错误格式**：`{ name: "WatyNotifyError", code, message }`，`code` 为 `NOTIFY_INVALID_ARGUMENT` / `NOTIFY_PERMISSION_DENIED` / `NOTIFY_NOT_SUPPORTED` / `NOTIFY_BACKEND_UNAVAILABLE` / `NOTIFY_IO_ERROR` / `NOTIFY_UNKNOWN`。
@@ -1674,9 +1818,20 @@ declare global {
             };
             os?: {
                 platform(): Promise<'win32' | 'darwin' | 'linux'>;
-                arch(): Promise<'x64' | 'arm64'>;
-                homedir(): Promise<string>;
-                getPath(path: 'appData' | 'config' | 'temp' | 'downloads' | 'documents' | 'executable' | 'home' | 'cache' | 'logs'): Promise<string>;
+                arch(): Promise<'x64' | 'arm64' | 'unknown'>;
+            };
+            path?: {
+                readonly sep: string;
+                readonly delimiter: string;
+                cwd(): string;
+                normalize(path: string): string;
+                join(...parts: string[]): string;
+                resolve(...parts: string[]): string;
+                basename(path: string, ext?: string): string;
+                dirname(path: string): string;
+                extname(path: string): string;
+                isAbsolute(path: string): boolean;
+                getPath(path: 'appData' | 'config' | 'temp' | 'downloads' | 'documents' | 'executable' | 'home' | 'cache' | 'logs'): string;
             };
             fs?: {
                 readFile(path: string): Promise<Uint8Array>;
@@ -1746,7 +1901,8 @@ declare global {
                     actions?: Array<{ id: string; label: string }>;
                     timeout?: number;
                     tag?: string;
-                }): Promise<{ ok: boolean }>;
+                    closeOnAction?: boolean;
+                }, callbackOrHandlers?: ((event: WatyNotifyEvent) => void) | WatyNotifyHandlers): Promise<{ ok: boolean }>;
                 hasPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
                 requestPermission(): Promise<'not_determined' | 'granted' | 'denied' | 'provisional' | 'unsupported'>;
             };
@@ -1782,13 +1938,17 @@ interface Stats {
 export {};
 ```
 
+> `WatyNotifyEvent` / `WatyNotifyHandlers` 的完整定义见 `types/waty.d.ts`；为节省篇幅此处省略。
+
 ---
 
 ## 11. 调试与日志
 
 - **DevTools**：C++ 侧 `ww->openDevTools()`，JS 侧 `window.waty.window.openDevTools()`；均需在 `ApplicationOptions.permissions.devtools` 中启用（JS 侧同时受 `permissions.window` 控制）。未启用时 C++ 抛出异常、JS Promise reject。Release 下不做自动空操作，由使用者自行控制。
-- **统一日志**：C++ 侧日志输出到控制台；若设置了 `ApplicationOptions.logFile`，同时写入文件。相对路径相对于可执行文件目录，建议使用 `getPath` 拼接绝对路径。
-- **logFile 父目录不存在时**，自动循环创建多级目录，创建失败则记录警告并仅输出到控制台
+- **统一日志**：C++ 侧日志输出到控制台；若设置了 `ApplicationOptions.logFile` / `Application::setLogFile`，同时追加写入文件。
+- **logFile 为 `std::optional<std::string>`**：`std::nullopt`（或不赋值）表示关闭文件日志；空字符串同样视为关闭并记录 warning。不要用 `nullptr` 表示关闭。
+- **相对路径**基于可执行文件目录解析；文件以追加方式打开，每行立即 flush。
+- **logFile 父目录不存在时**，自动循环创建多级目录；创建或打开失败则记录警告并仅输出到控制台。
 - **JS 日志转发**：当 `permissions.log = true` 时，JS 的 `console.log/warn/error` 会转发到 C++ 日志。
 - **崩溃捕获 (仅限JS异常)**：JS 异常上报到 C++，通过 `app.on("js-error-crash", ...)` 监听。该事件**仅覆盖渲染进程内的 JS 异常**，例如未捕获的 JS 异常、Promise rejection 等。
 
@@ -1808,8 +1968,8 @@ export {};
   - 不因 WebView 数据目录创建失败而阻止应用启动。
 - **非法 `appName` 诊断**：`Application` 构造时若 `appName` 非法，记录错误日志并抛出 `std::invalid_argument`。日志应包含实际值、校验规则和失败原因。
 - **非法 `organizationName` 诊断**：与 `appName` 相同；若 `organizationName` 非法，记录错误日志并抛出 `std::invalid_argument`，日志包含实际值与校验规则。
-- **`SysPath::Executable` 获取失败诊断**：若无法获取可执行文件完整路径，记录警告并返回空字符串。
-- **旧 `SysPath` 值诊断**：使用 `UserData` / `AppDir` 时记录 deprecated 警告，提示改用 `Config` / `Executable`。
+- **`SysPath::Executable` 获取失败诊断**：`waty::path::getPath(SysPath::Executable)` 抛出 `PathError{PATH_NOT_AVAILABLE}`；内部图标解析仍可回退到当前工作目录。
+- **路径参数诊断**：URL、非法 UTF-8、未知 `SysPath`、应用级路径缺少 `organizationName` / `appName` 时抛出 `PathError`，C++ 侧可通过 `PathError::code()` 区分。
 
 ---
 
@@ -1827,7 +1987,8 @@ export {};
 | `asar` 打包 | `waty_embed` | 资源嵌入二进制 |
 | 前端构建 | 使用者自选 | Waty 不介入 |
 | `fs` 模块 | `window.waty.fs` | 独立桥接，需显式开启权限，无路径白名单 |
-| `os` 模块 | `window.waty.os` | 需显式开启权限，含 `getPath`，全部异步 |
+| `os` 模块 | `window.waty.os` | 需显式开启权限，仅 `platform` / `arch`，全部异步 |
+| `path` 模块 | `window.waty.path` | 需 `permissions.path`；同步路径工具 + `getPath` + `resolve` + `cwd` |
 | 窗口控制 | `window.waty.window` | 需 `permissions.window` |
 | `dialog.showOpenDialog` | `window.waty.dialog.showOpenDialog` | 基于 `saucer/desktop` File-Picker，需 `permissions.dialog` |
 | `dialog.showSaveDialog` | `window.waty.dialog.showSaveDialog` | 同上 |
@@ -1836,9 +1997,10 @@ export {};
 | 系统通知（`Notification`） | `waty::notify`（C++）/ `window.waty.notify`（JS） | 内置系统通知；C++ 侧 `<waty/notify.hpp>`，JS 侧需 `permissions.notify` |
 | 系统托盘（`Tray`） | `waty::tray`（C++，`<waty/tray.hpp>`） | 内置系统托盘，仅 C++ API，暂无 JS 桥 |
 | 单实例锁 | `app.requestSingleInstanceLock()` | 直接对应，返回 false 应立即 `app.quit()` |
-| `app.getPath('userData')` | `getPath(SysPath::Config)` / `os.getPath("config")` | Linux 下均指向 `~/.config/<organizationName>/<appName>` 风格路径（默认 `waty`） |
-| `app.getPath('exe')` | `getPath(SysPath::Executable)` / `os.getPath("executable")` | 返回可执行文件完整路径（含文件名） |
+| `app.getPath('userData')` | `waty::path::getPath(SysPath::Config)` / `path.getPath("config")` | Linux 下均指向 `~/.config/<organizationName>/<appName>` 风格路径（默认 `waty`） |
+| `app.getPath('exe')` | `waty::path::getPath(SysPath::Executable)` / `path.getPath("executable")` | 返回可执行文件完整路径（含文件名） |
 | `app.getPath('appData')` | 不等同于 `SysPath::AppData` | Waty 的 `AppData` 是 XDG 数据目录；Electron 的 `appData` 更接近 Waty 的 `Config` 父目录 |
+| `process.cwd()` | `waty::path::cwd()` / `path.cwd()` | JS 侧为同步缓存，外部 `chdir` 后最多一个事件循环 tick 延迟 |
 | `app.on('window-all-closed', ...)` | `app.on("window-all-closed", ...)` + `Event::preventDefault()` | Waty 保留平台默认；可用 `preventDefault()` 阻止默认退出。Electron 无 `preventDefault`，通常由监听器条件调用 `app.quit()`。 |
 
 > Waty 额外提供 `ipc.createInvoker` 用于自定义超时与取消，Electron 对应能力需通过第三方或自行实现。
@@ -1857,6 +2019,7 @@ waty/
 │       ├── application.hpp
 │       ├── web_window.hpp
 │       ├── options.hpp
+│       ├── paths.hpp           # 路径模块公共 API（SysPath / waty::path）
 │       ├── dialog.hpp          # 对话框选项结构体
 │       ├── notify.hpp          # 系统通知模块公共 API
 │       ├── tray.hpp            # 系统托盘模块公共 API（单头文件）
@@ -1865,6 +2028,8 @@ waty/
 │       └── ipc_error.hpp
 ├── src/
 │   ├── application.cpp
+│   ├── paths.cpp               # 路径模块实现（std::filesystem / 平台目录 / UTF-8）
+│   ├── path_internal.hpp       # 路径模块与 Application 共享的内部辅助
 │   ├── web_window.cpp
 │   ├── detail.hpp              # Impl 定义与内部函数声明
 │   ├── js_bridge.cpp
@@ -1887,6 +2052,8 @@ waty/
 ├── README.md
 └── DESIGN.md
 ```
+
+> 独立的 `../waty-app-template` 模板项目不在 waty 仓库内；它通过 FetchContent 引入 waty，并包含路径 C++ 单测与 JS e2e。
 
 ---
 
@@ -1934,7 +2101,9 @@ waty/
 ## 15. 安全说明
 
 - `window.waty.fs` 参考 Node.js，**默认关闭**。仅当 `permissions.fs.read` / `permissions.fs.write` 为 `true` 时才可访问。Waty 不对路径做白名单限制，路径访问安全由操作系统或容器工具负责。
-- `window.waty.os` 会泄露系统信息，默认关闭。`getPath` 同样受此权限控制，且为异步 API。
+- `window.waty.os` 会泄露系统信息（platform / arch），默认关闭。
+- `window.waty.path` 会泄露 cwd、Home、可执行文件路径、应用数据目录等，默认关闭，需 `permissions.path = true`。启用前请评估泄露风险。
+- `window.waty.path` 是同步模块，不经过 IPC；C++ 侧 `waty::path` 始终可用，不受该权限影响。
 - `window.waty.window` 窗口控制默认关闭，需 `permissions.window = true`。
 - `window.waty.dialog` 默认关闭，需 `permissions.dialog = true`。文件选择对话框会将用户选择的完整文件系统路径暴露给 JS 环境。`showMessageBox` 不涉及文件系统路径，但仍是原生 UI 调用，受同一权限控制。
 - `showMessageBox` 通过 Saucer Native API 调用平台原生实现，不经过 WebView 渲染，因此不受 `loadURL` 安全策略的约束。
@@ -1962,13 +2131,14 @@ waty/
 - Linux 上 GTK 版本低于 4.10 时，`showMessageBox` 会回退到旧版 API。如果应用对对话框外观有严格要求，请在使用者文档中明确标注 GTK 4.10+ 为推荐版本。
 - 若在 `window-all-closed` 中阻止默认退出，应用可能继续驻留，需自行管理退出时机与单实例锁释放。
 - WebView 运行时数据可能包含 Cookie、LocalStorage、缓存等敏感信息。Waty 默认将其放入用户数据目录，建议在 Linux 上确保目录权限为仅当前用户可访问（如 `0700`）。
-- `storage_path` 由 C++ 侧控制，不通过 JS 暴露；JS 侧仅可通过 `permissions.os` 下的 `getPath("appData")` 获取应用数据目录。
+- `storage_path` 由 C++ 侧控制，不通过 JS 暴露；JS 侧仅可通过 `permissions.path` 下的 `path.getPath("appData")` 获取应用数据目录。
 - 若用户显式设置 `webviewStoragePath`，应自行确保路径可写且权限合理。
 - macOS 上 WKWebView 可能使用 UUID 关联数据，`storage_path` 不保证完全控制实际存储位置。
-- `ApplicationOptions.appName` 会参与目录路径拼接，因此必须严格限制为 `[A-Za-z0-9_]+`，并拒绝 Windows 保留设备名。Waty 不做静默净化，非法输入直接抛出 `std::invalid_argument`。
-- `ApplicationOptions.organizationName` 与 `appName` 采用相同严格校验规则，并同样用于目录路径拼接；默认值为 `waty`。
-- `getPath("executable")` 会暴露可执行文件完整路径，可能包含安装目录、用户名等信息，受 `permissions.os` 控制，默认关闭。
-- `getPath("config")` 返回应用配置目录，可能包含用户配置，受 `permissions.os` 控制。
+- `ApplicationOptions.appName` 会参与目录路径拼接，因此限制为 `[A-Za-z0-9_.]+`，且不得以 `.` 开头/结尾、不得为 `..`、拒绝 Windows 保留设备名（含 `CON.txt` 形式）。Waty 不做静默净化，非法输入直接抛出 `std::invalid_argument`。
+- `ApplicationOptions.organizationName` 与 `appName` 采用相同规则，并同样用于目录路径拼接；默认值为 `waty`。允许 `google.com` 这类域名形式。
+- `path.getPath("executable")` 会暴露可执行文件完整路径，可能包含安装目录、用户名等信息，受 `permissions.path` 控制，默认关闭。
+- `path.getPath("config")` 返回应用配置目录，可能包含用户配置，受 `permissions.path` 控制。
+- `path.cwd()` 会暴露当前工作目录，受 `permissions.path` 控制。
 
 ---
 
@@ -1985,7 +2155,7 @@ waty/
 - **新增** `ApplicationOptions.webviewStoragePath`：WebView 运行时数据目录，留空时默认使用 `getPath(SysPath::AppData) / "webview"`。
 - **新增** `WebWindowOptions.storagePath`：单窗口覆盖 WebView 运行时数据目录。
 - **变更** 默认 WebView `storage_path` 不再使用当前工作目录下的 `.saucer`，改为平台用户数据目录。
-- **新增** `ApplicationOptions.appName` 严格校验：仅允许数字、英文字母大小写、下划线，正则 `^[A-Za-z0-9_]+$`，并拒绝 Windows 保留设备名。
+- **新增** `ApplicationOptions.appName` 严格校验：仅允许数字、英文字母大小写、下划线，正则 `^[A-Za-z0-9_]+$`，并拒绝 Windows 保留设备名。（v0.1.0 起额外允许 `.`，规则见 6.3。）
 - **变更** `appName` 不再做静默净化；非法时 `Application` 构造函数抛出 `std::invalid_argument`。
 - **变更** `SysPath::UserData` 重命名为 `SysPath::Config`：因其实现返回 `XDG_CONFIG_HOME` 目录，命名更准确。旧名保留为 deprecated 别名。
 - **变更** `SysPath::AppDir` 重命名为 `SysPath::Executable`：返回可执行文件完整路径（含文件名）。旧名保留为 deprecated 别名。
@@ -2005,3 +2175,22 @@ waty/
 - **新增** `waty::notify` 系统通知模块（原 `waty-notify` 仓库合并入主库）：公共头 `<waty/notify.hpp>`，实现位于 `src/notify/`，编译进 `waty` 库；同时新增 JS 桥 `window.waty.notify`（需 `permissions.notify = true`）。
 - **新增** `waty::tray` 系统托盘模块（原 `waty-tray` 仓库合并入主库）：公共头 `<waty/tray.hpp>`（由原 6 个头文件合并为单头文件），实现位于 `src/tray/`，编译进 `waty` 库；仅提供 C++ API，暂无 JS 桥。
 - **依赖**：Linux 新增 `dbus-1` / `glib-2.0` / `gdk-pixbuf-2.0`；macOS 新增 UserNotifications / Foundation / Cocoa 框架并启用 OBJCXX；Windows 新增 `windowsapp` / `shell32` / `user32`。
+
+---
+
+## 附录 C：v0.1.0 变更摘要
+
+- **破坏性变更**：移除 `Application::getPath`；路径功能迁移到独立 `<waty/paths.hpp>` / `waty::path`。
+- **破坏性变更**：移除 `window.waty.os.homedir()` / `window.waty.os.getPath()`；新增同步 `window.waty.path`，受 `permissions.path` 控制。
+- **破坏性变更**：移除 `SysPath::UserData` / `SysPath::AppDir` 别名；应用级路径必须显式提供 `organizationName` / `appName`。
+- **新增** `waty::path`：`normalize` / `join` / `resolve` / `basename` / `dirname` / `extname` / `isAbsolute` / `cwd` / `getPath`。
+- **语义**：采用 `std::filesystem` 词法语义；`join("/a", "/b") == "/b"`；`join("a", "") == "a/"`；空结果统一为 `"."`；`resolve` 去除末尾分隔符（根目录除外）。
+- **新增** `permissions.path`：默认 `false`，控制整个 `window.waty.path` 模块；`permissions.os` 仅保留 `platform` / `arch`。
+- **cwd**：C++ 每次调用实时读取；JS 侧每轮事件循环刷新缓存，`path.cwd()` / `path.resolve()` 最多有一个 tick 延迟。
+- **`ApplicationOptions` 字符串字段改为 owned 类型**：`appName` / `organizationName` / `icon` 为 `std::string`；`logFile` / `webviewStoragePath` 为 `std::optional<std::string>`，消除 `string_view` 悬空风险。
+- **`logFile`**：`std::nullopt` 表示关闭；空字符串关闭并记录 warning；相对路径基于可执行文件目录；追加写并逐行 flush；新增 `Application::setLogFile(std::optional<std::string_view>)`。
+- **平台**：Linux / Windows / macOS 均实现 `SysPath::Executable`；公共路径字符串统一 UTF-8。
+- **`appName` / `organizationName`**：允许 `.`，支持 `google.com` 形式；仍拒绝 `.` / `..`、首尾点与 Windows 保留设备名（含带扩展名形式）。
+- **Notify JS 回调**：`notify.send(options, callbackOrHandlers?)` 支持单回调或 `{ onAction, onClose, onError }`；回调与具体 `send` 关联，`close` / `error` 后自动移除。
+- **Notify action 一次性语义**：`notification.close_on_action` / JS `closeOnAction` 默认 `true`；首次 action 后关闭通知、触发 `close_reason::action` 并忽略重复 action。
+- **测试**：路径 C++ 单测与 JS e2e 位于独立的 `../waty-app-template` 项目（不在 waty 库源码树内），该项目通过 FetchContent 引入 waty。
