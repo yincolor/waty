@@ -1,3 +1,15 @@
+// Linux 托盘：StatusNotifierItem + com.canonical.dbusmenu 实现。
+//
+// 协议速览：
+//   * 本进程请求服务名 org.kde.StatusNotifierItem-<pid>-<id>，注册对象路径
+//     /StatusNotifierItem 与 /MenuBar，然后调用 watcher 的 RegisterStatusNotifierItem；
+//   * 面板通过 org.freedesktop.DBus.Properties.Get/GetAll 读取属性；
+//   * 菜单通过 com.canonical.dbusmenu.GetLayout 获取 (ia{sv}av) 树，
+//     点击时面板发 Event/EventGroup，事件名通常为 "clicked"。
+//
+// 注意：所有 export 的属性都是只读（Set 返回 PropertyReadOnly）。
+// 图形资源以 IconPixmap(a(iiay), ARGB32) 或 IconName(主题名/路径) 提供。
+
 #include "sni_dbus.hpp"
 
 #include <dbus/dbus.h>
@@ -14,6 +26,7 @@ namespace waty::tray::detail
 {
     namespace
     {
+        // 对象路径消息分入口：user_data 即对应的 SniItem 实例。
         DBusHandlerResult message_cb(DBusConnection *, DBusMessage *message, void *user_data)
         {
             if (!message || !user_data)
@@ -32,6 +45,8 @@ namespace waty::tray::detail
             .message_function   = message_cb,
         };
 
+        // 以下三个 helper 生成 dbusmenu 属性字典中的单个 a{sv} 项。
+        // 手写 DBusMessageIter 比 dbus_message_append_args 更灵活（可嵌套容器）。
         void append_dict_entry_string(DBusMessageIter *dict, const char *key, const char *value)
         {
             DBusMessageIter entry, variant;
@@ -67,6 +82,9 @@ namespace waty::tray::detail
         }
     } // namespace
 
+    // 服务名必须全局唯一：用 pid + 自增 id 区分同进程的多个托盘图标。
+    // 对象路径固定为 /StatusNotifierItem，因此每个 SniItem 独占一条连接名
+    // （不同服务名可以用相同对象路径）。
     SniItem::SniItem(DBusConnection *conn, std::string id, std::string title)
         : conn_(conn), id_(std::move(id)), title_(std::move(title))
     {
@@ -85,6 +103,9 @@ namespace waty::tray::detail
         }
     }
 
+    // 注册流程：请求服务名 → 注册两个对象路径 → 向 watcher 注册服务名。
+    // 任一步失败都回滚已注册的对象路径，避免残留半初始化状态。
+    // DBUS_NAME_FLAG_DO_NOT_QUEUE：名字被占用时立即失败而不是排队等待。
     TrayResult<void> SniItem::register_with_watcher()
     {
         if (!conn_)
@@ -171,6 +192,8 @@ namespace waty::tray::detail
         icon_h_ = 0;
     }
 
+    // 设置像素图标。SNI 的 IconPixmap 要求 ARGB32（网络字节序/大端），
+    // 而 gdk-pixbuf 给的是 RGBA，所以这里逐像素重排。
     void SniItem::set_icon_pixmap(std::vector<std::byte> rgba, std::uint32_t width, std::uint32_t height)
     {
         icon_name_.clear();
@@ -200,6 +223,9 @@ namespace waty::tray::detail
         rebuild_menu_layout();
     }
 
+    // 把 MenuItem 树扁平化为 id → FlatItem，便于 dbusmenu 按 id 查询/事件回传。
+    // id 从 1 开始递增；根节点 id 固定为 0（dbusmenu 约定）。
+    // 注意：FlatItem::item 指向 Menu 内部节点，Menu 生命周期必须覆盖 SniItem。
     void SniItem::rebuild_menu_layout()
     {
         flat_.clear();
@@ -237,6 +263,8 @@ namespace waty::tray::detail
         layout_revision_++;
     }
 
+    // 接口分发优先级：Properties → StatusNotifierItem → dbusmenu。
+    // Properties 不在 SNI 接口名下，所以必须先判断。
     DBusHandlerResult SniItem::handle_message(DBusMessage *message)
     {
         if (dbus_message_is_method_call(message, "org.freedesktop.DBus.Properties", "Get") ||
@@ -256,6 +284,11 @@ namespace waty::tray::detail
         return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
     }
 
+    // 按属性名写入 variant 值。签名必须与 append_sni_property() 中声明的一致：
+    //   Category/Id/Title/Status/IconName → s
+    //   Menu                              → o
+    //   IconPixmap                        → a(iiay)
+    //   ToolTip                           → (sa(iiay)ss)
     void SniItem::append_sni_value(DBusMessageIter *variant, const std::string &key)
     {
         if (key == "Category")
@@ -348,6 +381,10 @@ namespace waty::tray::detail
         return true;
     }
 
+    // 处理 org.freedesktop.DBus.Properties：
+    //   Get     —— 返回单个 variant（属性名未知时返回空字符串）；
+    //   GetAll  —— 按接口返回全部属性（SNI 或 dbusmenu）；
+    //   Set     —— 一律只读错误（Set 在下方提前返回）。
     DBusHandlerResult SniItem::handle_properties(DBusMessage *msg)
     {
         if (dbus_message_is_method_call(msg, "org.freedesktop.DBus.Properties", "Get"))
@@ -451,6 +488,12 @@ namespace waty::tray::detail
         return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
     }
 
+    // 处理 SNI 方法调用：
+    //   Activate           → on_activate（左键点击）
+    //   SecondaryActivate  → on_secondary_activate（中键/右键，由面板决定）
+    //   ContextMenu        → 菜单由 dbusmenu 提供，无需回调
+    //   Scroll             → on_scroll（滚轮，方向信息暂未使用）
+    // 未知方法返回 NOT_YET_HANDLED，交给其它处理器。
     DBusHandlerResult SniItem::handle_sni(DBusMessage *msg)
     {
         const char *member = dbus_message_get_member(msg);
@@ -495,6 +538,8 @@ namespace waty::tray::detail
         return DBUS_HANDLER_RESULT_HANDLED;
     }
 
+    // 写入一个 dbusmenu 属性（label/enabled/visible/type/toggle-*/children-display）。
+    // 返回 false 表示不支持的属性名（调用方忽略即可）。
     bool SniItem::append_menu_property(DBusMessageIter *dict, const FlatItem &item, const char *name)
     {
         const std::string key(name);
@@ -545,6 +590,8 @@ namespace waty::tray::detail
         return false;
     }
 
+    // 递归写入一个菜单节点：(ia{sv}av)。
+    // 节点属性 + 子节点数组（每个子节点用 variant 包裹，签名 (ia{sv}av)）。
     bool SniItem::append_layout_item(DBusMessageIter *parent, int id)
     {
         const auto it = flat_.find(id);
@@ -587,6 +634,12 @@ namespace waty::tray::detail
         return true;
     }
 
+    // 处理 com.canonical.dbusmenu 方法：
+    //   GetLayout         → (u revision, (ia{sv}av) layout)
+    //   Event / EventGroup → 点击事件（只处理 "clicked"）
+    //   AboutToShow*      → 返回“无需更新”
+    //   GetGroupProperties / GetProperty → 属性查询
+    // 未实现的方法返回 NOT_YET_HANDLED。
     DBusHandlerResult SniItem::handle_dbusmenu(DBusMessage *msg)
     {
         const char *member = dbus_message_get_member(msg);

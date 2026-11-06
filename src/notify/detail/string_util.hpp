@@ -1,6 +1,8 @@
 #pragma once
 
 // 内部字符串工具（header-only）。
+// 目前仅用于 Linux 后端：读取进程名作为 D-Bus Notify 的 app_name，
+// 同时作为 desktop-entry hint（用于通知图标/分组匹配）。
 
 #include <cstdio>
 #include <string>

@@ -19,6 +19,12 @@
 #include <string_view>
 #include <vector>
 
+// 线程模型与所有权：
+//   * TrayContext::initialize() / TrayIcon::create() 应在 UI 线程调用；
+//   * on_click / on_right_click / on_double_click 与 MenuItem::on_click 均在宿主 UI 线程执行；
+//   * TrayIcon::set_menu() 按值接收 Menu：菜单及其回调被拷贝进托盘对象，
+//     调用方无需保证 Menu 的生命周期（但 MenuItem::icon 等资源会一同复制）。
+
 namespace waty::tray
 {
     /// 托盘库统一错误码（见 DESIGN.md §7.7）
@@ -39,6 +45,10 @@ namespace waty::tray
 
     /// 托盘图标（见 DESIGN.md §7.7）。
     /// 支持四种来源：主题图标名、RGBA 像素数据、文件路径、内存中的编码图像数据。
+    ///
+    /// 注意：from_file() 只校验文件存在，不做解码；实际解码因平台而异：
+    /// Linux 在 set_icon() 时用 gdk-pixbuf 解码并转为 SNI IconPixmap，
+    /// 其它平台由各自原生 API 加载。
     class Icon
     {
       public:
@@ -156,7 +166,9 @@ namespace waty::tray
         Submenu,
     };
 
-    /// 菜单项（见 DESIGN.md §7.7）
+    /// 菜单项（见 DESIGN.md §7.7）。
+    /// type 决定平台如何渲染：Normal 普通项、Checkbox 勾选项、Separator 分隔线、
+    /// Submenu 子菜单（其 children 为子项）。id 用于事件回传（菜单点击回调会捕获该项）。
     struct MenuItem
     {
         MenuItemType type = MenuItemType::Normal;
@@ -169,7 +181,8 @@ namespace waty::tray
         std::move_only_function<void()> on_click;  // 回调在宿主 UI 线程执行
     };
 
-    /// 托盘菜单（见 DESIGN.md §7.7）
+    /// 托盘菜单（见 DESIGN.md §7.7）。
+    /// 仅是一个有序 MenuItem 容器；真正提交给平台发生在 TrayIcon::set_menu()。
     class Menu
     {
       public:

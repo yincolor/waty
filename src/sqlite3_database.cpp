@@ -1,3 +1,8 @@
+// 单数据库工作线程实现。
+// 关闭流程：置 m_stopping → request_stop + notify_all → join（已入队任务先执行完）
+//           → sqlite3_close_v2。sqlite3_close_v2 是“宽容关闭”：
+// 即使还有未 finalize 的 statement，SQLite 也会在它们释放后真正关闭。
+
 #include "sqlite3_database.hpp"
 
 namespace waty::detail
@@ -24,6 +29,8 @@ namespace waty::detail
         }
     }
 
+    // 工作线程主循环：等待“有任务”或“已停止”；任务在锁外执行，
+    // 因此提交新任务不会被长 SQL 阻塞。停止后仍会把队列排空再退出。
     void Sqlite3Database::run(std::stop_token stop)
     {
         for (;;)

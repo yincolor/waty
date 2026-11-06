@@ -1,3 +1,23 @@
+// 系统通知桥（见 DESIGN.md §7.6 / §8.6）。
+//
+// 前端 API（需 permissions.notify）：
+//   waty.notify.send(options, handlers?) → Promise<{ok:true}>
+//   waty.notify.hasPermission()         → "granted" | "denied" | ...
+//   waty.notify.requestPermission()     → 同上（完成后返回）
+//
+// options 字段：title, body, icon, actions[{id,label}], timeout(ms), tag,
+//               closeOnAction(bool，默认 true)。
+//
+// 事件回传（window.waty.notify 内部监听 "notify-event"）：
+//   { event:"action", callbackId, title, tag, actionId, label }
+//   { event:"close",  callbackId, title, tag, reason, reasonCode }
+//   { event:"error",  callbackId, title, tag, code, message }
+// 同时保留旧式广播事件 notify-action / notify-closed / notify-error，
+// 方便不使用 callbackId 的页面继续工作。
+//
+// 线程：notify 库的回调在它自己的事件线程；本文件负责 post 回 UI 线程，
+// 再通过 WebWindow::emit 转发给 JS（窗口已关闭时 emit 会静默丢弃）。
+
 #include <waty/notify.hpp>
 
 #include "detail.hpp"
@@ -15,6 +35,7 @@ namespace waty::detail
 {
     namespace
     {
+        // 枚举 → JS 字符串。未知值统一返回 "unsupported"。
         std::string_view notify_permission_to_string(waty::notify::permission_status status)
         {
             switch (status)
@@ -28,6 +49,7 @@ namespace waty::detail
             return "unsupported";
         }
 
+        // 库错误码 → JS 稳定错误码（NOTIFY_*）。
         std::string_view notify_errc_to_code(waty::notify::errc code)
         {
             switch (code)
@@ -42,6 +64,7 @@ namespace waty::detail
             return "NOTIFY_UNKNOWN";
         }
 
+        // 统一错误对象：{ name:"WatyNotifyError", code, message }。
         nlohmann::json notify_error_json(const waty::notify::error &error)
         {
             return nlohmann::json{{"name", "WatyNotifyError"},
@@ -49,6 +72,7 @@ namespace waty::detail
                                   {"message", error.message}};
         }
 
+        // 关闭原因 → JS 字符串（expired / dismissed / replaced / unknown / action）。
         const char *notify_close_reason_to_string(waty::notify::close_reason reason)
         {
             switch (reason)
@@ -73,6 +97,8 @@ namespace waty::detail
         }
     } // namespace
 
+    // notify 通道入口。即使 JS 被注入，也会再次校验 permissions.notify（纵深防御）。
+    // 回调捕获 window 的 shared_ptr：通知可能在窗口关闭后触发，此时 emit 会丢弃。
     void handle_notify_request(WebWindow::Impl &impl, const nlohmann::json &req)
     {
         const auto id = req.value("id", static_cast<std::uint64_t>(0));

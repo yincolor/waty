@@ -1,12 +1,23 @@
 #pragma once
 
+// 原生对话框选项与结果（见 DESIGN.md §6.5）。
+//
+// 这些结构体同时用于 C++ API 与 JS 桥（字段名在 JS 侧转为 camelCase）：
+//   * OpenDialogOptions  → waty.dialog.showOpenDialog(options)
+//   * SaveDialogOptions  → waty.dialog.showSaveDialog(options)
+//   * MessageBoxOptions  → waty.dialog.showMessageBox(options)
+//
+// 注意：字符串字段使用 std::string_view，调用方必须保证其生命周期覆盖对话框调用；
+// JS 桥内部会先把字符串拷贝到局部 std::string 再赋值，避免临时对象悬空。
+
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace waty
 {
-    /// 文件类型过滤器（见文档 6.5）
+    /// 文件类型过滤器（见文档 6.5）。
+    /// 平台会将其转换为 "*.png;*.jpg" 之类的模式；extensions 不带前导点。
     struct FileFilter
     {
         std::string name;                     // 显示名称，如 "Images"
@@ -35,7 +46,8 @@ namespace waty
         std::vector<FileFilter> filters;
     };
 
-    /// 消息框类型（见文档 6.5）
+    /// 消息框类型（见文档 6.5）。
+    /// 用于选择平台图标（信息/警告/错误/问号）；None 表示不显示图标。
     enum class MessageBoxType
     {
         None,
@@ -60,7 +72,8 @@ namespace waty
         bool modal           = true;                   // 是否模态
     };
 
-    /// 原生消息框结果（见文档 6.5）
+    /// 原生消息框结果（见文档 6.5）。
+    /// Linux 的 GtkAlertDialog 不支持复选框，checkboxChecked 恒为 false。
     struct MessageBoxResult
     {
         int response;              // 用户点击的按钮索引（0 起始）；标题栏关闭时为 -1

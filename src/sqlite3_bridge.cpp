@@ -1,3 +1,18 @@
+// SQLite3 JS 桥（见 DESIGN.md §7.1 / §8.4）。
+//
+// 前端 API（需 permissions.sqlite3）：
+//   waty.sqlite3.openDatabase(dbName, version) → { dbId, execute, query, transaction, close }
+//   execute(sql, params)       → { changes, lastInsertRowid }
+//   query(sql, params)         → { rows:[...], columns:[...] }
+//   transaction(statements)    → { ok:true }；statements 元素为 SQL 字符串
+//                                或 { sql, params }，内部 BEGIN IMMEDIATE/COMMIT/ROLLBACK。
+//
+// 协议（通道 "sqlite3"）：请求 { __waty:"sqlite3", id, op, dbId?, dbName?, version?, sql?, params?, statements? }。
+// 错误对象：{ name:"WatySqlite3Error", code: SQLITE3_*, message }。
+//
+// 线程：请求在临时线程等待 Service 的 shared_future，完成后 post 回 UI 线程响应。
+// 数据库连接由 Sqlite3Service 按窗口记账（见 sqlite3_service.hpp）。
+
 #include "detail.hpp"
 
 #include "sqlite3_service.hpp"
@@ -14,6 +29,8 @@ namespace waty::detail
 {
     namespace
     {
+        // 异常 → JS 错误对象。Sqlite3Error 保留自身 code；
+        // invalid_argument 映射为 SQLITE3_INVALID_ARGUMENT；其余归为 SQLITE3_INTERNAL。
         nlohmann::json sqlite3_error_from_exception(const std::exception_ptr &ptr)
         {
             try
@@ -42,6 +59,7 @@ namespace waty::detail
             }
         }
 
+        // 必需字符串字段：缺失或类型不符抛 Sqlite3Error（最终变成 rejected Promise）。
         std::string string_field(const nlohmann::json &req, const char *key)
         {
             if (!req.contains(key) || !req[key].is_string())
@@ -51,6 +69,7 @@ namespace waty::detail
             return req[key].get<std::string>();
         }
 
+        // 可选对象字段：缺失/null 返回空对象，类型不符抛错（params 必须是对象）。
         nlohmann::json object_field(const nlohmann::json &req, const char *key)
         {
             if (!req.contains(key) || req[key].is_null())
@@ -65,6 +84,9 @@ namespace waty::detail
         }
     } // namespace
 
+    // sqlite3 通道入口。
+    // 所有异步操作都在新线程中等待 Service 的 future，避免阻塞 UI；
+    // 但 Service 自身保证同一连接上的 SQL 串行执行。
     void handle_sqlite3_request(WebWindow::Impl &impl, const nlohmann::json &req)
     {
         const auto id = req.value("id", static_cast<std::uint64_t>(0));

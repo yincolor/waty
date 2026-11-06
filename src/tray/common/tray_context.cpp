@@ -1,3 +1,11 @@
+// TrayContext 公共实现：平台初始化的幂等包装。
+//
+// 平台初始化/清理是进程级的，但 API 允许创建多个 TrayContext。
+// 这里的 initialized 仅代表本对象是否调用过 platform_initialize()；
+// 真正的连接由各平台实现共享（Linux 为全局 D-Bus 连接）。
+// 注意：任一 TrayContext 析构都会触发 platform_cleanup()，
+// 因此同一进程内不建议同时持有多个 TrayContext。
+
 #include <waty/tray.hpp>
 
 #include "../platform.hpp"

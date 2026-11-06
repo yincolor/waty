@@ -1,3 +1,9 @@
+// waty-notify 事件线程实现。
+//
+// 每轮循环：排空任务队列 → 调用后端 poll_once() → 在平台唤醒源上最多等 50ms。
+// 50ms 是“无事件时的最大轮询延迟”：D-Bus/Win32 等事件源需要定期泵消息，
+// 有任务投递时 wake 源会立即唤醒，不产生额外延迟。
+
 #include "event_loop.hpp"
 
 #include <cstdint>
@@ -136,6 +142,9 @@ void event_loop::post(std::move_only_function<void()> task) {
     }
 }
 
+// 停止事件线程：请求停止并唤醒；最多等 100ms。
+// 若超时（用户回调阻塞），把 jthread 移入堆对象“泄漏”掉，
+// 避免析构函数在静态析构阶段无限 join 导致进程卡死。
 void event_loop::stop() {
     if (!thread_.joinable()) {
         return;

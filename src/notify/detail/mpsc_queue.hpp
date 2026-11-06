@@ -13,6 +13,8 @@
 
 namespace waty::notify::detail {
 
+// 用法：push() 可在任意线程；try_pop() 只允许事件线程调用。
+// 队列为空时返回 nullopt（不自旋、不阻塞）；唤醒由 event_loop 负责。
 template <class T>
 class mpsc_queue {
   public:

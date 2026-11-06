@@ -1,3 +1,20 @@
+// 文件系统桥（见 DESIGN.md §8.3）。
+//
+// 前端 API（需 permissions.fs.read / permissions.fs.write）：
+//   waty.fs.readFile(path)            → Uint8Array
+//   waty.fs.stat(path)                → { size, mtimeMs, mtimeISO, exists, isFile, isDirectory, type }
+//   waty.fs.exists(path)              → boolean
+//   waty.fs.createReadStream(path, {highWaterMark}) → ReadableStream<Uint8Array>
+//   waty.fs.writeFile(path, data)     → Promise<void>
+//   waty.fs.createWriteStream(path)   → WritableStream<Uint8Array>
+//
+// 协议（通道 "fs"）：
+//   请求 { __waty:"fs", id, op, path, ... }；二进制一律 base64。
+//   流式读写使用全局 streamId 表，页面必须调用 closeStream（读流 EOF/取消、写流 close/abort）释放。
+//
+// 错误形状：{ name:"WatyFsError", code, message, details:{ path, syscall } }。
+// 线程：所有磁盘 I/O 在临时线程执行，结果 post 回 UI 线程再兑现 Promise。
+
 #include <waty/web_window.hpp>
 
 #include "base64.hpp"
@@ -26,17 +43,20 @@ namespace waty::detail
         // -----------------------------------------------------------------
         // 流式读写注册表
         // -----------------------------------------------------------------
+        // 所有窗口共享同一张表（key 为全局自增 id）；互斥锁保证多线程访问安全。
+        // 读流在 EOF 时自动移除；写流依赖页面 closeStream（析构 ofstream 时落盘）。
         struct StreamEntry
         {
-            std::unique_ptr<std::ifstream> in;
-            std::unique_ptr<std::ofstream> out;
-            std::size_t chunk_size = 65536;
+            std::unique_ptr<std::ifstream> in;   // 读流非空
+            std::unique_ptr<std::ofstream> out;  // 写流非空
+            std::size_t chunk_size = 65536;      // 仅读流使用
         };
 
         std::mutex g_streams_mutex;
         std::unordered_map<std::uint64_t, std::unique_ptr<StreamEntry>> g_streams;
         std::atomic<std::uint64_t> g_next_stream_id{1};
 
+        // 带稳定错误码与路径的异常，最终序列化为 WatyFsError。
         struct FsError : std::runtime_error
         {
             std::string code;
@@ -54,6 +74,8 @@ namespace waty::detail
                                   {"details", {{"path", err.path}, {"syscall", syscall}}}};
         }
 
+        // 组装 stat 结果。文件不存在不抛异常，而是返回 exists=false 的零值对象，
+        // 便于前端用同一形状做存在性判断（与 Node.js fs.stat 抛错不同）。
         nlohmann::json stat_json(const std::filesystem::path &path)
         {
             std::error_code ec;
@@ -103,6 +125,7 @@ namespace waty::detail
         }
 
         // 执行一次 fs 操作，返回结果 json；失败抛 FsError。
+        // 每个 op 的请求/响应字段见文件头；writeFile 会截断目标文件。
         nlohmann::json do_fs_op(const nlohmann::json &req)
         {
             const std::string op = req.value("op", "");
@@ -227,6 +250,8 @@ namespace waty::detail
         }
     } // namespace
 
+    // fs 通道入口。捕获 FsError/其它异常后统一 post 回 UI 线程响应；
+    // req 按值捕获到线程中，避免调用方释放后悬空。
     void handle_fs_request(WebWindow::Impl &impl, const nlohmann::json &req)
     {
         const std::uint64_t id = req.value("id", static_cast<std::uint64_t>(0));

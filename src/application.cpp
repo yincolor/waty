@@ -1,3 +1,17 @@
+// 应用生命周期实现（见 DESIGN.md §7.3）。
+//
+// 本文件负责：
+//   * 全局日志 sink（stderr + 可选文件，线程安全）；
+//   * Application 的构造/析构、窗口注册表、应用事件白名单；
+//   * onEventLoopTick 任务链（借助 Saucer::post 在每轮 UI 循环自续投递）；
+//   * run() 的 UI 线程入口：realize 窗口、触发 ready / quit；
+//   * Linux 单实例锁（flock + Unix domain socket）。
+//
+// 线程模型：
+//   * UI 线程（Saucer/GTK 主线程）执行 run()、窗口 realize 与所有事件回调；
+//   * 单实例监听使用独立 jthread，收到第二个实例的消息后 post 回 UI 线程；
+//   * detail::post_to_ui_thread 是跨线程回投的唯一入口。
+
 #include <waty/application.hpp>
 
 #include "detail.hpp"
@@ -34,10 +48,14 @@ namespace waty::detail
 {
     namespace
     {
+        // 日志 sink 全局单例：mutex 同时保护 stderr 写入与文件流替换，
+        // 保证多线程日志不会交错、set_log_file 不会与写入竞争。
         std::mutex g_log_mutex;
         std::unique_ptr<std::ofstream> g_log_stream;
     } // namespace
 
+    // 把回调投递到 UI 线程。app 为空（例如窗口尚未 realize）时直接丢弃，
+    // 调用方因此无需在每次跨线程回投时判空。
     void post_to_ui_thread(saucer::application *app, std::function<void()> callback)
     {
         if (!app)
@@ -47,6 +65,12 @@ namespace waty::detail
         app->post(std::move(callback));
     }
 
+    // 切换文件日志。语义：
+    //   * nullopt        → 关闭并释放文件句柄；
+    //   * 空字符串       → 视为关闭，但记录一条 warning；
+    //   * 相对路径       → 基于可执行文件目录解析；
+    //   * 目录不存在     → 自动创建；打开失败则保持关闭。
+    // 先构造新流再在锁内替换，失败时旧流保持不变（但本实现失败会关闭日志）。
     void set_log_file(std::optional<std::string_view> path)
     {
         std::unique_ptr<std::ofstream> next;
@@ -104,6 +128,9 @@ namespace waty::detail
         }
     }
 
+    // 写一条日志：[waty][level] message。
+    // 始终输出到 stderr，并在启用文件日志时追加到文件；每次写完都 flush，
+    // 便于崩溃后保留最后几条日志（性能要求不高的桌面场景可接受）。
     void log_message(std::string_view level, std::string_view message)
     {
         std::string line;
@@ -130,6 +157,8 @@ namespace waty
 {
     namespace
     {
+        // 应用事件白名单：Application::on() 只接受这些事件名，
+        // 拼写错误会立即抛 std::invalid_argument，而不是静默失效。
         const std::unordered_set<std::string> k_app_events = {
             "ready",
             "before-quit",
@@ -141,6 +170,8 @@ namespace waty
             "js-error-crash",
         };
 
+        // 读取当前进程命令行，用于 second-instance 事件负载。
+        // Linux 通过 /proc/self/cmdline（NUL 分隔）；其它平台暂未实现，返回空数组。
         std::vector<std::string> current_argv()
         {
             std::vector<std::string> argv;
@@ -171,6 +202,12 @@ namespace waty
 
     } // namespace
 
+    // 构造阶段按顺序完成：
+    //   1. 校验 appName / organizationName（会拼进用户目录，必须防路径穿越）；
+    //   2. 保存配置、初始化日志、创建数据目录路径与 Sqlite3Service；
+    //   3. 创建 saucer::application；
+    //   4. 预解析图标、挂接 quit 事件、注册 embedded:// 协议。
+    // 第 2 步只计算路径不建目录；数据库文件在首次 open 时才落地。
     Application::Application(const ApplicationOptions &options)
         : m_impl(std::make_unique<Impl>())
     {
@@ -270,6 +307,9 @@ namespace waty
         detail::set_log_file(path);
     }
 
+    // 更新应用图标并同步到所有已 realize 的窗口。
+    // 注意：这里按“窗口当前图标路径”判断会丢失“继承应用图标”的信息，
+    // 因此实际行为是所有窗口都改用新应用图标（窗口级 icon 已被覆盖为应用图标）。
     void Application::setIcon(std::string_view iconPath)
     {
         m_impl->icon          = std::string(iconPath);
@@ -341,6 +381,9 @@ namespace waty
         return m_impl->events.on(std::string(event), std::move(callback));
     }
 
+    // 注册每轮事件循环任务。
+    // 任务被 shared_ptr 持有；返回的 Subscription 只把 alive 置 false，
+    // 真正的清理发生在 run_tick_loop 末尾（erase_if），因此回调执行期间列表稳定。
     Subscription Application::onEventLoopTick(std::function<void()> callback)
     {
         auto task = std::make_shared<Impl::TickTask>();
@@ -364,6 +407,7 @@ namespace waty
         });
     }
 
+    // 启动任务链（幂等）：如果已经在运行则直接返回，避免重复投递造成多链并行。
     void Application::start_tick_chain()
     {
         std::lock_guard<std::mutex> lock(m_impl->tick_mutex);
@@ -375,6 +419,8 @@ namespace waty
         detail::post_to_ui_thread(m_impl->app.get(), [this] { run_tick_loop(); });
     }
 
+    // 一轮任务执行：快照存活回调 → 逐个执行 → 清理已取消任务 → 若仍有任务则 post 自续。
+    // tick_iterating 用于阻止回调中注册/取消（文档 7.3.3），重入直接 abort。
     void Application::run_tick_loop()
     {
         if (m_impl->tick_iterating)
@@ -423,9 +469,15 @@ namespace waty
 
     void Application::quit()
     {
+        // 交给 Saucer/平台事件循环处理；before-quit / will-quit 在 quit 事件中拦截。
         m_impl->app->quit();
     }
 
+    // 运行 UI 事件循环。协程体内在 UI 线程执行：
+    //   1. 为所有已创建窗口 realize 原生对象（期间可能抛异常，会让 run 直接失败）；
+    //   2. 触发 ready；
+    //   3. 等待事件循环结束；
+    //   4. 触发 quit（此时已无法阻止退出）。
     int Application::run()
     {
         return m_impl->app->run([this](saucer::application *saucer_app) -> coco::stray {
@@ -457,6 +509,10 @@ namespace waty
         return std::vector<std::uint8_t>(begin, begin + content->size());
     }
 
+    // Linux 单实例协议：
+    //   主实例：open(lock) → flock(LOCK_EX|LOCK_NB) 成功 → 监听 <app>.sock；
+    //   次实例：flock 失败 → connect(<app>.sock) → 发送 {argv, cwd} → 返回 false。
+    // 锁文件与 socket 都位于配置目录（Config），确保同一用户下互斥。
     bool Application::requestSingleInstanceLock()
     {
         if (m_impl->single_instance)
@@ -543,6 +599,8 @@ namespace waty
         m_impl->events.emit(event, data);
     }
 
+    // 窗口 closed 回调：递减计数并在归零时触发 window-all-closed。
+    // 默认行为：非 macOS 退出应用，macOS 保持运行；监听器可 preventDefault() 阻止退出。
     void Application::handleWindowClosed()
     {
         const auto remaining = m_impl->open_windows.fetch_sub(1) - 1;
@@ -566,6 +624,9 @@ namespace waty
 #endif
     }
 
+    // 在 UI 线程分发 second-instance。
+    // 负载补充 windowId：优先取当前第一个窗口，没有窗口时为 0；
+    // 调用方（主实例）可据此聚焦已有窗口。
     void Application::dispatchSecondInstance(nlohmann::json data)
     {
         data["windowId"] = [&] {
@@ -576,6 +637,9 @@ namespace waty
     }
 
 #if defined(__linux__)
+    // 启动 Unix domain socket 监听线程。
+    // 每次 accept 后读取全部字节，按 JSON 解析；解析失败/空消息按空对象处理，
+    // 然后 post 到 UI 线程触发 second-instance（错误数据不会让监听线程退出）。
     void Application::start_instance_listener()
     {
         const std::string sock_path = m_impl->sock_path;
@@ -645,6 +709,8 @@ namespace waty
         });
     }
 
+    // 第二个实例向主实例发送启动信息：{ "argv": [...], "cwd": "..." }。
+    // 连接失败（主实例恰好退出/未就绪）时静默放弃，调用方仍按“非主实例”继续。
     void Application::notify_primary(const std::string &sock_path)
     {
         const int cfd = ::socket(AF_UNIX, SOCK_STREAM, 0);

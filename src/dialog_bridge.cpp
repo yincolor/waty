@@ -1,3 +1,16 @@
+// 原生对话框桥（见 DESIGN.md §6.5 / §8.5）。
+//
+// 两条入口共享同一套平台实现（show_*_dialog_native）：
+//   1. C++ API：WebWindow::showOpenDialog / showSaveDialog / showMessageBox；
+//   2. JS 桥： handle_dialog_request 解析 { options } 后调用同一函数。
+//
+// 当前仅 Linux（GTK4）有完整实现；Windows/macOS 在桥接层直接回调取消/失败。
+//
+// 线程：必须在 UI 线程调用（GTK 对话框需要主循环）。
+// 异步：GTK 的 *_async API 在回调中响应 Promise；回调数据用 new 分配、在完成时 delete。
+// 生命周期：对话框对象在完成回调中 unref；使用方持有的 WebWindow::Impl 在回调期间仍然有效
+// （窗口关闭时 view 为空，respond 会自行丢弃）。
+
 #include <waty/dialog.hpp>
 #include <waty/web_window.hpp>
 
@@ -26,6 +39,8 @@ namespace waty::detail
 #if defined(__linux__)
     namespace
     {
+        // 取原生 GtkWindow 作为对话框父窗口（保证模态居中/焦点正确）。
+        // 窗口尚未 realize 时返回 nullptr，GTK 会退化为无父窗口对话框。
         GtkWindow *parent_window(WebWindow::Impl &impl)
         {
             if (!impl.window)
@@ -35,6 +50,8 @@ namespace waty::detail
             return GTK_WINDOW(impl.window->native().window);
         }
 
+        // 把 FileFilter 转换为 GtkFileFilter（每个扩展名一条 "*.ext" 模式）。
+        // filters 为空时不设置，GTK 默认显示所有文件。
         void set_filters(GtkFileDialog *dialog, const std::vector<FileFilter> &filters)
         {
             if (filters.empty())
@@ -61,6 +78,7 @@ namespace waty::detail
             g_object_unref(store);
         }
 
+        // 异步回调上下文：持有对话框指针与业务回调，完成时统一释放。
         struct OpenDialogData
         {
             GtkFileDialog *dialog = nullptr;
@@ -94,6 +112,8 @@ namespace waty::detail
             }
         }
 
+        // 打开文件（单选/多选）完成回调。用户取消时 GError 被设置，
+        // 这里统一把 paths 置为 nullopt 以区分“取消”与“选了空”。
         void on_open_done(GObject *source, GAsyncResult *result, gpointer user_data)
         {
             auto *data = static_cast<OpenDialogData *>(user_data);
@@ -136,6 +156,7 @@ namespace waty::detail
             delete data;
         }
 
+        // 选择目录完成回调（最多返回一个路径）。
         void on_folder_done(GObject *source, GAsyncResult *result, gpointer user_data)
         {
             auto *data = static_cast<OpenDialogData *>(user_data);
@@ -163,6 +184,7 @@ namespace waty::detail
             delete data;
         }
 
+        // 保存文件完成回调；取消时 path 为 nullopt。
         void on_save_done(GObject *source, GAsyncResult *result, gpointer user_data)
         {
             auto *data = static_cast<SaveDialogData *>(user_data);
@@ -190,6 +212,8 @@ namespace waty::detail
             delete data;
         }
 
+        // 消息框完成回调。返回 GTK 的 response 值；用户点标题栏 X / Esc 时
+        // 通常是 GTK_RESPONSE_DELETE_EVENT（负数），前端应按 <0 表示“未选择按钮”。
         void on_message_box_done(GObject *source, GAsyncResult *result, gpointer user_data)
         {
             auto *data = static_cast<MessageBoxData *>(user_data);
@@ -210,6 +234,11 @@ namespace waty::detail
     } // namespace
 #endif
 
+    // 创建并显示原生打开对话框。三种模式互斥：
+    //   directory=true        → 选目录（忽略 multiSelect）；
+    //   multiSelect=true      → 多选文件；
+    //   否则                  → 单选文件。
+    // Linux 的 GtkFileDialog 没有 showHidden 直接开关，当前忽略该选项。
     void show_open_dialog_native(WebWindow::Impl &impl, const OpenDialogOptions &options,
                                  std::function<void(std::optional<std::vector<std::string>>)> callback)
     {
@@ -249,6 +278,7 @@ namespace waty::detail
 #endif
     }
 
+    // 创建并显示原生保存对话框：title / defaultPath / defaultName / filters 均可选。
     void show_save_dialog_native(WebWindow::Impl &impl, const SaveDialogOptions &options,
                                  std::function<void(std::optional<std::string>)> callback)
     {
@@ -279,6 +309,10 @@ namespace waty::detail
 #endif
     }
 
+    // 创建并显示原生消息框。
+    // buttons 至少一个；defaultButtonIndex/cancelButtonIndex 已在调用方校验；
+    // GTK 4.12+ 才支持默认/取消按钮与复选框（旧版忽略这些字段）。
+    // 注意 button_storage 先 reserve 再取 c_str()，保证指针在调用期间稳定。
     void show_message_box_native(WebWindow::Impl &impl, const MessageBoxOptions &options,
                                  std::function<void(MessageBoxResult)> callback)
     {
@@ -325,6 +359,7 @@ namespace waty::detail
 
     namespace
     {
+        // 安全读取 JSON 字符串字段：不存在或类型不符时返回 fallback。
         std::string str_field(const nlohmann::json &j, const char *key, std::string fallback = "")
         {
             const auto it = j.find(key);
@@ -335,6 +370,7 @@ namespace waty::detail
             return it->get<std::string>();
         }
 
+        // 解析 JS 侧传入的 filters 数组；非法项静默跳过（对话框不因坏过滤器而失败）。
         std::vector<FileFilter> parse_filters(const nlohmann::json &o)
         {
             std::vector<FileFilter> filters;
@@ -363,6 +399,11 @@ namespace waty::detail
         }
     } // namespace
 
+    // dialog 通道入口。响应形状（JS 侧 Promise 结果）：
+    //   showOpenDialog → { canceled, filePaths[] }
+    //   showSaveDialog → { canceled, filePath }
+    //   showMessageBox → { response, checkboxChecked }
+    // 参数校验失败返回 DIALOG_INVALID_ARGUMENT。
     void handle_dialog_request(WebWindow::Impl &impl, const nlohmann::json &request)
     {
         const std::uint64_t id = request.value("id", static_cast<std::uint64_t>(0));
@@ -441,7 +482,7 @@ namespace waty::detail
             }
 
             MessageBoxOptions options;
-            // MessageBoxOptions 的字符串字段是 string_view；必须先保存到本地 std::string，
+            // 重要：MessageBoxOptions 的字符串字段是 string_view；必须先保存到本地 std::string，
             // 否则 str_field() 返回的临时字符串会在赋值后立即销毁，导致 string_view 悬空，
             // GTK/Pango 收到非法 UTF-8（中文尤其明显）。
             const std::string title = str_field(o, "title");
@@ -495,6 +536,7 @@ namespace waty::detail
 
 namespace waty
 {
+    // C++ API 直接调用平台实现。注意：必须在 UI 线程调用（GTK 对话框需要主循环）。
     void WebWindow::showOpenDialog(const OpenDialogOptions &opts,
                                    std::function<void(std::optional<std::vector<std::string>>)> callback)
     {

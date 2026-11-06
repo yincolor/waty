@@ -1,5 +1,20 @@
 #pragma once
 
+// 路径工具（见 DESIGN.md §7.3.2）。
+//
+// 两套语义：
+//   * waty::path 下的同步函数 —— 纯 JSON/标准库风格的词法运算；
+//   * waty::SysPath + getPath —— 按平台规则返回系统/应用目录。
+//
+// 字符串约定：所有输入输出均为 UTF-8；Windows 内部会转换为宽字符再运算。
+// 错误约定：失败抛 PathError，其 code 与 JS 侧 WatyPathError.code 一致。
+//
+// 平台默认值（未设置环境变量时）：
+//   Linux   : AppData=~/.local/share, Config=~/.config, Cache=~/.cache
+//   Windows : AppData=%%LOCALAPPDATA%%, Config=%%APPDATA%%
+//   macOS   : AppData=~/Library/Application Support, Config=~/Library/Preferences
+// 应用级路径再拼 <organizationName>/<appName>；Logs 在 Config 下再加 logs。
+
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
@@ -25,6 +40,8 @@ namespace waty
     };
 
     /// 路径操作错误。code 与 JS 侧 WatyPathError.code 保持一致。
+    /// 常见 code：PATH_INVALID_ARGUMENT（参数非法，如传入了 URL）
+    ///            PATH_NOT_AVAILABLE（环境变量/当前目录不可用）。
     class PathError : public std::runtime_error
     {
       public:
@@ -92,14 +109,15 @@ namespace waty
         /// 是否为绝对路径（平台语义）。
         bool isAbsolute(std::string_view value);
 
-        /// 获取系统路径。应用级路径需要 organizationName / appName。
-        /// 缺少参数、路径不可用或写入非法时抛出 PathError。
+        /// 获取系统路径。应用级路径（AppData/Config/Cache/Logs）需要 organizationName / appName，
+        /// 调用本重载会抛 PATH_INVALID_ARGUMENT；其余路径（Temp/Downloads/...）可直接使用。
         std::string getPath(SysPath path);
 
         /// 获取系统路径，显式传入 organizationName / appName。
         std::string getPath(SysPath path, std::string_view organizationName, std::string_view appName);
 
         /// 从 ApplicationOptions 读取 organizationName / appName。
+        /// 名称非法时抛 PATH_INVALID_ARGUMENT；不创建目录，仅返回拼接后的路径。
         std::string getPath(SysPath path, const ApplicationOptions &options);
     } // namespace path
 } // namespace waty

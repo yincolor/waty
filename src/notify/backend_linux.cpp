@@ -1,3 +1,16 @@
+// Linux 后端：org.freedesktop.Notifications（D-Bus）。
+//
+// 工作方式：
+//   * init() 连接会话总线，订阅 NotificationClosed / ActionInvoked 信号；
+//   * send() 调用 Notify(app_name, replaces_id, app_icon, summary, body,
+//                        actions[], hints{}, expire_timeout) → uint32 id；
+//   * 事件线程每 50ms 调 poll_once() → dbus_connection_read_write_dispatch，
+//     信号经 signal_filter 进入 handle_signal，再查 pending_ 触发回调。
+//
+// 替换语义：同 tag 的新通知把旧 id 作为 replaces_id 传给守护进程，
+// 然后主动对旧通知触发 on_closed(replaced) 并移除映射；
+// 守护进程后续发来的旧 id 关闭信号会被忽略（pending_ 中已不存在）。
+
 #include "backend.hpp"
 #include "detail/string_util.hpp"
 
@@ -22,6 +35,7 @@ class backend_linux;
 
 DBusHandlerResult signal_filter(DBusConnection*, DBusMessage*, void*);
 
+// 单例后端：一个进程一条 D-Bus 连接，所有通知共享 pending_ 表。
 class backend_linux final : public backend {
   public:
     backend_linux() = default;
@@ -54,6 +68,8 @@ class backend_linux final : public backend {
         return {};
     }
 
+    // 关闭：移除信号过滤器并释放连接；pending_ 中的回调不再触发
+    // （库退出时不再报告 close 事件）。
     void shutdown() noexcept override {
         if (!conn_) {
             return;
@@ -78,6 +94,8 @@ class backend_linux final : public backend {
         }
     }
 
+    // 投递通知。D-Bus Notify 的参数顺序即下方 append 顺序，不能调整。
+    // expire_timeout：-1 表示由守护进程决定，否则为毫秒数。
     std::expected<uint64_t, error> send(notification n) override {
         if (!conn_) {
             return std::unexpected(error{errc::backend_unavailable, "D-Bus connection is not available"});
@@ -222,6 +240,7 @@ class backend_linux final : public backend {
         return id;
     }
 
+    // 事件线程钩子：非阻塞派发所有待处理 D-Bus 消息。
     void poll_once() override {
         if (!conn_) {
             return;
@@ -280,6 +299,8 @@ class backend_linux final : public backend {
         }
     }
 
+    // 处理 NotificationClosed。reason: 1=超时, 2=用户关闭, 3=CloseNotification 调用,
+    // 4=未定义。这里把 3/4 都归为 unknown。
     void on_closed_signal(std::uint32_t id, std::uint32_t reason) {
         const auto it = pending_.find(id);
         if (it == pending_.end()) {
@@ -315,6 +336,9 @@ class backend_linux final : public backend {
         }
     }
 
+    // 处理 ActionInvoked。close_on_action=false 时保持 pending，允许重复点击；
+    // true 时先摘除 pending（后续重复信号被忽略），再主动关闭平台通知，
+    // 最后依次触发 on_action 与 on_closed(action)。
     void on_action_signal(std::uint32_t id, std::string_view action_key) {
         const auto it = pending_.find(id);
         if (it == pending_.end()) {

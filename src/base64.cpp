@@ -1,11 +1,17 @@
 #include "base64.hpp"
 
+// 标准 base64 编解码（RFC 4648，带 '=' 填充）。
+// 编码：每 3 字节 → 4 字符；不足 3 字节用 '=' 补齐。
+// 解码：容忍换行/空格等非法字符（直接跳过），遇到 '=' 停止，因此可解码
+//       带换行的 PEM 风格输入；不校验尾部填充是否正确。
+
 namespace waty::detail
 {
     namespace
     {
         const char k_b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+        // 字符 → 6-bit 值；非法字符返回 -1（解码时跳过）。
         int b64_value(char c)
         {
             if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -17,6 +23,7 @@ namespace waty::detail
         }
     } // namespace
 
+    // 34 字符表索引：a>>2 / ((a&3)<<4)|(b>>4) / ((b&0xf)<<2)|(c>>6) / c&0x3f。
     std::string base64_encode(const unsigned char *data, std::size_t size)
     {
         std::string out;
@@ -34,6 +41,7 @@ namespace waty::detail
         return out;
     }
 
+    // 位缓冲解码：累积 6 bit，每满 8 bit 输出一个字节。
     std::string base64_decode(std::string_view input)
     {
         std::string out;

@@ -20,6 +20,7 @@
 namespace waty::notify::detail {
 namespace {
 
+// NSString → std::string（UTF-8）。nil 返回空串。
 std::string nsstring_to_std(NSString* value) {
     if (!value) {
         return {};
@@ -55,6 +56,8 @@ class backend_macos final : public backend {
         center_ = nil;
     }
 
+    // 同步查询授权状态：把异步 getNotificationSettings 用信号量桥接为阻塞调用。
+    // 注意：只能在非主线程调用（事件线程），否则主队列阻塞会死锁。
     permission_status permission() override {
         if (!center_) {
             return permission_status::unsupported;
@@ -106,6 +109,11 @@ class backend_macos final : public backend {
         }];
     }
 
+    // 投递通知。
+    //   * identifier 固定为 waty-notify-<id>，同 tag 替换由库自己维护映射并主动
+    //     对旧通知触发 on_closed(replaced)（系统不会替我们发这个事件）；
+    //   * trigger=nil 表示立即投递；timeout 通过 dispatch_after 移除已投递通知；
+    //   * actions 需要注册 UNNotificationCategory，categoryId 按通知 id 唯一。
     std::expected<uint64_t, error> send(notification n) override {
         if (!center_) {
             return std::unexpected(error{errc::backend_unavailable, "UNUserNotificationCenter is not available"});

@@ -1,3 +1,18 @@
+// 窗口 + WebView 实现（见 DESIGN.md §7.4）。
+//
+// 本文件包含三部分：
+//   1. 嵌入资源注册表与图标解析（waty_embed 生成代码的运行时支撑）；
+//   2. WebWindow 的窗口状态/控制 API（realize 前后行为差异见各方法注释）；
+//   3. realize()：在 UI 线程创建原生窗口/WebView，注册 embedded:// 协议，
+//      并把 Saucer 原生事件映射为 waty 窗口事件，最后注入 JS 桥。
+//
+// realize 前后行为：
+//   * 可缓存的配置（标题/尺寸/最小尺寸/边框/全屏/可缩放/图标/存储目录）在构造时保存；
+//   * 可排队的操作（loadFile / loadURL / show）写入 pending_*，realize 后立即执行；
+//   * 无法缓存的控制（setSize / maximize / ...）在 realize 前抛 std::logic_error。
+//
+// 嵌入资源路径约定：相对路径、以 '/' 分隔；loadFile 会做词法规范化并拒绝越界路径。
+
 #include <waty/web_window.hpp>
 
 #include "detail.hpp"
@@ -26,8 +41,10 @@ namespace waty::detail
 {
     namespace
     {
+        // 嵌入资源注册表。
         // 使用 Meyers 单例，避免静态初始化顺序问题（waty_embed 生成的静态初始化器
         // 在程序启动早期调用 register_embedded_resource，此时全局 map 可能尚未构造）。
+        // 互斥锁保护 map；查找返回拷贝（std::optional<std::string>），避免调用方持有悬空引用。
         std::mutex &embed_mutex()
         {
             static std::mutex mutex;
@@ -59,6 +76,10 @@ namespace waty::detail
         return it->second;
     }
 
+    // 图标解析顺序（文档 5 / 6.4）：
+    //   1. 嵌入资源中同名相对路径（如 waty_embed 打包的 "icon.png"）；
+    //   2. 文件系统路径；相对路径基于可执行文件目录解析。
+    // 两者都失败返回 nullopt，调用方回退系统默认图标。
     std::optional<saucer::icon> resolve_icon(std::string_view path)
     {
         if (path.empty())
@@ -100,6 +121,7 @@ namespace waty::detail
     {
         // saucer 在 GTK 后端的 window::set_icon 是空实现，窗口图标会显示为系统默认图标。
         // 这里直接通过 GTK4 的 GdkToplevel 设置窗口图标。
+        // 注意：必须在 GDK surface realize 之后调用，否则 icon list 会被忽略。
         void set_gtk_window_icon(GtkWindow *gtk_window, const saucer::icon &icon)
         {
             auto *surface = gtk_native_get_surface(GTK_NATIVE(gtk_window));
@@ -181,6 +203,8 @@ namespace waty
 {
     namespace
     {
+        // 默认嵌入页：仅当用户没有通过 waty_embed 注册 index.html 时注入，
+        // 方便最小示例在没有任何前端产物时也能跑通。
         const std::string g_default_index = R"html(<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -214,6 +238,11 @@ namespace waty
             });
         }
 
+        // 规范化嵌入资源路径并做安全校验：
+        //   * 必须非空；
+        //   * 必须是相对路径（禁止以 '/' 开头）；
+        //   * 规范化后不得为 ".." 或以 "../" 开头（防止读穿嵌入根目录）。
+        // 返回使用 generic_string()（'/' 分隔），作为 embedded:// 的路径部分。
         std::string normalize_embedded_path(std::string_view entry)
         {
             std::filesystem::path path(entry);
@@ -234,6 +263,8 @@ namespace waty
             return normalized;
         }
 
+        // 根据扩展名推断 embedded:// 响应的 Content-Type。
+        // 前端构建产物常见类型均已覆盖；未知类型回退 application/octet-stream。
         std::string mime_for(std::string_view path)
         {
             const std::string ext = std::filesystem::path(path).extension().string();
@@ -254,12 +285,16 @@ namespace waty
             return "application/octet-stream";
         }
 
+        // 窗口事件白名单（windowEventHandle 只接受这些事件名）。
+        // 其中 close 支持 preventDefault()；sub-window-close 由子窗口触发、发给父窗口。
         const std::unordered_set<std::string> k_window_events = {
             "close", "closed", "resize", "move", "focus", "blur",
             "minimize", "maximize", "restore", "show", "hide", "sub-window-close",
         };
     } // namespace
 
+    // 构造函数只保存配置，不碰任何原生句柄（全部在 realize() 创建）。
+    // 字符串字段从 string_view 拷贝，调用方无需保证生命周期。
     WebWindow::WebWindow(Application *app, WindowId id, const WebWindowOptions &options)
         : m_impl(std::make_unique<Impl>())
     {
@@ -334,6 +369,7 @@ namespace waty
             }
         }
 
+        // 查询类接口的初始值：构造参数即期望值，之后由原生事件更新。
         m_impl->cached_size = {options.width, options.height};
     }
 
@@ -357,6 +393,8 @@ namespace waty
         return m_impl->id;
     }
 
+    // 加载嵌入资源。realize 前只记录 pending_entry；realize 后再 set_url。
+    // 真正的内容由 realize 中注册的 embedded:// scheme handler 提供。
     void WebWindow::loadFile(std::string_view entry)
     {
         if (entry.empty())
@@ -376,6 +414,8 @@ namespace waty
         }
     }
 
+    // 加载远程 URL（完全交给 Saucer/WebView 默认策略，不额外限制）。
+    // 与 loadFile 共用 pending 机制：realize 前调用会排队。
     void WebWindow::loadURL(std::string_view url)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
@@ -405,6 +445,11 @@ namespace waty
         return m_impl->fullscreen;
     }
 
+    // ---- 以下窗口控制大多要求 native window 已存在 ----
+    // 会抛 std::logic_error：setSize / setMinSize / setPosition / center /
+    //   maximize / minimize / restore / focus / setAlwaysOnTop；
+    // 可缓存或排队：setTitle / setResizable / setFullscreen / setWindowFrameState /
+    //   loadFile / loadURL / show；close / hide 在 realize 前为 no-op。
     void WebWindow::setSize(int width, int height)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
@@ -543,7 +588,8 @@ namespace waty
 
     void WebWindow::setDecorated(bool enabled)
     {
-        // 兼容旧接口：与 setWindowFrameState 等价
+        // 兼容旧接口：与 setWindowFrameState 等价。
+        // 历史上 decorated 表示“是否有标题栏/边框”，语义与 frame 一致。
         setWindowFrameState(enabled);
     }
 
@@ -599,6 +645,8 @@ namespace waty
         return m_impl->cached_visible;
     }
 
+    // 注册窗口事件（白名单校验）。
+    // 与 Application::on 一致：同一事件名允许多个监听器，Subscription 需显式取消。
     Subscription WebWindow::windowEventHandle(std::string_view event,
                                               std::function<void(Event &, const nlohmann::json &)> callback)
     {
@@ -609,6 +657,16 @@ namespace waty
         return m_impl->window_events.on(std::string(event), std::move(callback));
     }
 
+    // 在 UI 线程创建原生窗口与 WebView，并把所有排队操作应用上去。
+    //
+    // 执行顺序（有依赖关系，不要随意调整）：
+    //   1. 创建 saucer::window，应用标题/尺寸/最小尺寸/可缩放/全屏/边框/图标；
+    //   2. 创建 webview，绑定 window 与存储目录；
+    //   3. 注册 embedded:// scheme handler；
+    //   4. 注册原生窗口事件 → waty 事件；
+    //   5. 注入 JS 桥（依赖 webview 已存在）；
+    //   6. 应用 pending 的 loadURL/loadFile 与 show。
+    // realize 只执行一次（realized 标志），重复调用直接返回。
     void WebWindow::realize(saucer::application *app)
     {
         std::lock_guard<std::mutex> lock(m_impl->mutex);
@@ -670,7 +728,10 @@ namespace waty
         }
         m_impl->view = std::make_unique<saucer::webview>(std::move(*view));
 
-        // embedded:// 协议处理
+        // embedded:// 协议处理：URL 的 path 去掉前导 '/' 后作为资源 key。
+        // - 未找到：返回 404（not_found），前端可在 onerror 中处理；
+        // - 找到：返回 200 + 根据扩展名推断的 MIME。
+        // 注意这里不再重复路径越界校验：loadFile 已规范化，且 scheme 只能读到注册表内容。
         seed_default_embedded();
         m_impl->view->handle_scheme("embedded", [](saucer::scheme::request request, saucer::scheme::executor executor) {
             auto path = request.url().path().string();
@@ -694,7 +755,14 @@ namespace waty
             executor.resolve(std::move(response));
         });
 
-        // 原生窗口事件 → waty 窗口事件
+        // 原生窗口事件 → waty 窗口事件映射：
+        //   close      → "close"（可 preventDefault 阻止）
+        //   closed     → "closed" + 父窗口 "sub-window-close" + 注销 SQLite + window-all-closed
+        //   resize     → "resize" {width,height}（同时更新缓存）
+        //   focus      → "focus"/"blur"
+        //   maximize   → "maximize"/"restore"（更新缓存）
+        //   minimize   → "minimize"/"restore"（更新缓存）
+        // 所有监听器 clearable=false：窗口生命周期内不允许 Saucer 自行清除。
         m_impl->window->on<saucer::window::event::close>({{.func = [this]() -> saucer::policy {
             return m_impl->window_events.emit("close") ? saucer::policy::block : saucer::policy::allow;
         }, .clearable = false}});
@@ -745,7 +813,8 @@ namespace waty
             m_impl->window_events.emit(minimized ? "minimize" : "restore");
         }, .clearable = false}});
 
-        // JS 桥（ipc / os / fs / window / dialog）
+        // JS 桥（ipc / os / path / window / fs / dialog / sqlite3 / notify / log）。
+        // 只在 realize 时注入一次；脚本内容由权限位决定（见 js_bridge.cpp）。
         detail::setup_js_bridge(*m_impl);
 
         // 应用排队中的加载与显示
@@ -769,6 +838,8 @@ namespace waty
         }
     }
 
+    // 打开 DevTools（需 permissions.devtools）。
+    // JS 侧调用 waty.window.openDevTools() 时也会走到这里（保证权限校验只有一处）。
     void WebWindow::openDevTools()
     {
         if (!m_impl->app || !m_impl->app->m_impl->permissions.devtools)

@@ -1,3 +1,14 @@
+// Linux 托盘图标实现：把公共 Icon / Menu 适配到 SNI。
+//
+// 图标策略：
+//   * ThemeName → IconName（交给主题查找）；
+//   * Rgba      → 直接转 IconPixmap；
+//   * FilePath  → gdk-pixbuf 解码为像素后发 IconPixmap，失败回退 IconName；
+//   * Data      → gdk-pixbuf 内存解码后发 IconPixmap。
+//
+// 创建前会检测 StatusNotifierWatcher（org.kde.* 或 org.freedesktop.*）；
+// 都没有则返回 TrayError::NoTrayHost（例如纯 X11 无托盘宿主的桌面）。
+
 #include "../platform.hpp"
 
 #include "sni_dbus.hpp"
@@ -28,6 +39,8 @@ namespace waty::tray
 
         // 用 gdk-pixbuf 将图标（文件或内存编码数据）解码为 RGBA 像素
         // （SNI IconPixmap 需要像素数据）。
+        // 缩放策略：超过 24px 时双线性缩到 24×24，减小 D-Bus 消息体积；
+        // gdk-pixbuf 可能是 3 通道（无 alpha），此时补 0xFF。无需释放传入的 pixbuf。
         std::optional<Icon::Rgba> pixbuf_to_rgba(GdkPixbuf *pixbuf)
         {
             if (!pixbuf)
@@ -134,6 +147,7 @@ namespace waty::tray
             return rgba;
         }
 
+        // 把 TrayIcon 的虚方法转发给 SniItem；点击回调直接绑定到 SNI 的激活事件。
         class LinuxTrayIcon final : public TrayIcon
         {
           public:
@@ -181,6 +195,8 @@ namespace waty::tray
                 sni_->set_tooltip(std::string(tooltip), {});
             }
 
+            // 菜单由本对象持有（menu_），SniItem 只保存指针；
+            // 因此重复 set_menu 会先移动赋值，旧菜单及其回调随之释放。
             void set_menu(Menu menu) override
             {
                 menu_ = std::move(menu);
@@ -205,6 +221,8 @@ namespace waty::tray
 
     namespace detail
     {
+        // 创建托盘图标：必要时先初始化共享连接 → 检测 watcher →
+        // 创建并注册 SniItem → 包装为 LinuxTrayIcon。
         TrayResult<std::unique_ptr<TrayIcon>> platform_create_tray_icon()
         {
             DBusConnection *conn = shared_connection();

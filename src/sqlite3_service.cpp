@@ -1,3 +1,11 @@
+// SQLite3 服务实现（见 sqlite3_service.hpp 的整体说明）。
+//
+// 关键设计：
+//   * open 在调用线程同步完成（用 m_open_mtx 串行化），幂等且无需“正在打开”状态机；
+//   * execute/query/transaction 先 find() 提前失败，再投递到对应库的工作线程；
+//   * guard() 把同步异常（如 SQLITE3_NOT_OPEN / SQLITE3_CLOSING）转为 rejected future；
+//   * close/release_all 只在锁内摘除路由，真正的析构（排空队列 + join）在锁外发生。
+
 #include "sqlite3_service.hpp"
 
 #include "sqlite3_statement.hpp"
@@ -25,12 +33,14 @@ namespace waty::detail
         }
 
         /// 跨平台安全的 UTF-8 路径（Windows 下 path::string() 可能是 ANSI 编码）。
+        /// sqlite3_open_v2 在 Windows 上按 UTF-8 解释文件名，因此统一走 u8string()。
         std::string utf8_path(const std::filesystem::path &path)
         {
             const auto u8 = path.u8string();
             return std::string(reinterpret_cast<const char *>(u8.data()), u8.size());
         }
 
+        // 立即就绪的 shared_future（用于同步返回结果）。
         template <typename T>
         std::shared_future<T> ready(T value)
         {
@@ -39,6 +49,7 @@ namespace waty::detail
             return promise.get_future().share();
         }
 
+        // 立即失败的 shared_future（用于参数校验失败）。
         template <typename T>
         std::shared_future<T> failed(std::string code, std::string message)
         {
@@ -63,6 +74,7 @@ namespace waty::detail
             }
         }
 
+        // SQLite 64 位整数 → JSON。超出 JS 安全整数范围时转字符串，避免前端精度丢失。
         json int64_to_json(std::int64_t value)
         {
             if (value > k_max_safe_integer || value < -k_max_safe_integer)
@@ -72,6 +84,8 @@ namespace waty::detail
             return value;
         }
 
+        // 执行无参数、无结果的 SQL（BEGIN/COMMIT/ROLLBACK 等）。
+        // 失败抛 Sqlite3Error，错误信息优先用 sqlite3_exec 的 error 文本。
         void exec_raw(sqlite3 *db, const char *sql)
         {
             char *error  = nullptr;
@@ -101,6 +115,7 @@ namespace waty::detail
         });
     }
 
+    // 版本格式：^\d{1,3}\.\d{1,3}\.\d{1,3}$（手工扫描，避免正则依赖）。
     bool Sqlite3Service::valid_version(std::string_view version)
     {
         // ^\d{1,3}\.\d{1,3}\.\d{1,3}$
@@ -127,6 +142,10 @@ namespace waty::detail
         return part == 2 && digits > 0;
     }
 
+    // 打开（或复用）数据库。
+    // 首次打开：建目录 → sqlite3_open_v2 → 设置 WAL / busy_timeout → 建工作线程；
+    // 已打开：仅把当前窗口加入 owners 并返回同一 dbId。
+    // 达到 maxOpenDatabases 上限时返回 SQLITE3_TOO_MANY_OPEN。
     std::shared_future<std::string> Sqlite3Service::open(WindowToken window, const std::string &db_name,
                                                           const std::string &version)
     {
@@ -208,6 +227,8 @@ namespace waty::detail
         return it->second.database;
     }
 
+    // 执行单条写/DDL 语句。返回 { changes, lastInsertRowid }；
+    // 若 SQL 带 RETURNING，step_all() 会先排空结果集再返回。
     std::shared_future<json> Sqlite3Service::execute(WindowToken window, const std::string &db_id,
                                                      const std::string &sql, const json &params)
     {
@@ -229,6 +250,9 @@ namespace waty::detail
         });
     }
 
+    // 执行查询：逐行组装对象，列名来自结果集；
+    // 同名列表列（如 SELECT a.id, b.id）后者覆盖前者，需要别名区分。
+    // 返回 { rows:[{col:value}], columns:[name] }。
     std::shared_future<json> Sqlite3Service::query(WindowToken window, const std::string &db_id,
                                                    const std::string &sql, const json &params)
     {
@@ -273,6 +297,9 @@ namespace waty::detail
         });
     }
 
+    // 事务：BEGIN IMMEDIATE → 顺序执行 statements → COMMIT；
+    // 任一步失败则 ROLLBACK 并重新抛出原始异常。
+    // statements 元素为字符串或 { sql, params }。
     std::shared_future<json> Sqlite3Service::transaction(WindowToken window, const std::string &db_id,
                                                          const json &statements)
     {
@@ -337,6 +364,8 @@ namespace waty::detail
         });
     }
 
+    // 关闭当前窗口对 db 的句柄：仅从 owners 移除当前窗口；
+    // 若它是最后一个使用者，则摘除路由并在锁外析构连接（可能阻塞）。
     std::shared_future<json> Sqlite3Service::close(WindowToken window, const std::string &db_id)
     {
         std::shared_ptr<Sqlite3Database> closing;
@@ -362,6 +391,8 @@ namespace waty::detail
         return ready<json>(json{{"ok", true}});
     }
 
+    // 窗口销毁时注销其全部句柄。与 close 的区别：一次性处理所有 dbId。
+    // 最后一个持有者会在本函数内析构连接（可能阻塞），调用方通常放到后台线程。
     void Sqlite3Service::release_all(WindowToken window)
     {
         std::vector<std::shared_ptr<Sqlite3Database>> closing;

@@ -1,3 +1,11 @@
+// waty-notify 公共 API 实现（见 DESIGN.md §2 / §7.6）。
+//
+// 全局状态（g_backend / g_loop）惰性初始化：首次调用任意公共 API 时
+// 创建平台后端与事件线程，并注册 atexit 钩子。初始化后的调用把工作
+// 投递到事件线程（event_loop::submit），保证用户回调的线程一致性。
+//
+// 初始化失败返回 errc::backend_unavailable；已进入关闭流程时同样失败。
+
 #include <waty/notify.hpp>
 
 #include "backend.hpp"
@@ -30,6 +38,8 @@ detail::event_loop* loop_ptr() {
     return g_loop.get();
 }
 
+// 进程退出钩子：先置 shutting_down（拒绝新的初始化/投递），
+// 再停止事件线程，最后关闭后端（释放 D-Bus 连接 / WinRT 对象等）。
 void atexit_shutdown() {
     g_shutting_down.store(true, std::memory_order_release);
     if (g_loop) {
@@ -77,6 +87,8 @@ std::expected<void, error> ensure_initialized() {
 }
 
 // send() 的同步字段校验（见设计文档 §2.4.3）。
+// 规则：title 非空；actions ≤ 3 且 id/label 非空、id 唯一；
+//       timeout 在 (0, INT_MAX] ms；tag 非空字符串（若提供）。
 std::expected<void, error> validate(const notification& n) {
     if (n.title.empty()) {
         return std::unexpected(error{errc::invalid_argument, "title must not be empty"});

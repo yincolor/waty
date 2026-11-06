@@ -1,5 +1,18 @@
 #pragma once
 
+// SQLite3 服务层（仅 src/ 内部使用，经 sqlite3_bridge.cpp 暴露给 JS）。
+//
+// 职责：
+//   * 校验 dbName / version，并把 "<lower(dbName)>@<version>" 作为全局 dbId；
+//   * 管理 dbId → Sqlite3Database 的路由与窗口所有权（owners）；
+//   * 把所有操作包装为 std::shared_future，保证“绝不同步抛”契约。
+//
+// 数据库文件位置：<AppData>/sqlite3/db/<dbId>.db。
+// 同一 dbId 全应用只打开一次；不同窗口各自持有一个逻辑句柄，
+// 最后一个持有者 close/release 时才真正关闭连接。
+//
+// 锁顺序：m_open_mtx → m_mtx（打开/关闭时），其它路径只拿 m_mtx。
+
 #include "sqlite3_database.hpp"
 
 #include <nlohmann/json.hpp>
@@ -60,6 +73,7 @@ namespace waty::detail
             std::unordered_set<WindowToken> owners;
         };
 
+        // 查找并校验所有权；库不存在或不属于该窗口时抛 SQLITE3_NOT_OPEN。
         std::shared_ptr<Sqlite3Database> find(WindowToken window, const std::string &db_id) const;
 
         std::filesystem::path m_data_dir;

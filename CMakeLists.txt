@@ -126,19 +126,13 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ---------------------------------------------------------------------------
-# 单测（默认关闭；不依赖 WebView，仅链接 sqlite3）
+# 单测（默认关闭）
+#
+# 测试目标与 ctest 注册统一放在 tests/CMakeLists.txt；这里只保留开关与
+# 顶层 enable_testing()，保证可以从构建根目录运行 ctest。
 # ---------------------------------------------------------------------------
 option(WATY_BUILD_TESTS "Build waty unit tests" OFF)
 if(WATY_BUILD_TESTS)
     enable_testing()
-    add_executable(waty_sqlite3_tests
-        tests/sqlite3_tests.cpp
-        src/base64.cpp
-        src/sqlite3_database.cpp
-        src/sqlite3_service.cpp
-    )
-    target_compile_features(waty_sqlite3_tests PRIVATE cxx_std_23)
-    target_include_directories(waty_sqlite3_tests PRIVATE src)
-    target_link_libraries(waty_sqlite3_tests PRIVATE SQLite::SQLite3 nlohmann_json::nlohmann_json)
-    add_test(NAME sqlite3 COMMAND waty_sqlite3_tests)
+    add_subdirectory(tests)
 endif()

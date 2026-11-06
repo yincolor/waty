@@ -15,6 +15,16 @@
 #include <string_view>
 #include <vector>
 
+// 线程模型：
+//   * send() / has_permission() 可从任意线程调用；
+//   * on_action / on_closed / on_error 全部在库的事件线程执行（非 UI 线程）；
+//   * waty 的 JS 桥会把事件再投递回 UI 线程并转发为 notify-event。
+//
+// 与 JS 侧的对应关系（需要 permissions.notify = true）：
+//   waty.notify.send(options, handlers)  → send()
+//   waty.notify.hasPermission()          → has_permission()
+//   waty.notify.requestPermission()      → request_permission()
+
 namespace waty::notify {
 
 // ---- 关闭原因 ----
@@ -51,6 +61,8 @@ struct error {
 };
 
 // ---- 按钮 ----
+// id 用于在 on_action / JS 回调中区分按钮，label 是展示文本；
+// 一个通知最多 3 个按钮，id / label 均不能为空且 id 不能重复（由 send() 校验）。
 struct action {
     std::string id;
     std::string label;
@@ -86,6 +98,10 @@ struct notification {
 };
 
 // ---- 唯一入口 ----
+// 同步校验字段并投递到事件线程；返回成功仅表示“已成功投递到后端”。
+// 后端异步失败（如 Windows Toast 失败、Linux 无通知守护进程）通过 on_error 报告；
+// 若未提供 on_error，则输出到 stderr。传入的 notification 会被移动保存，
+// 直到通知关闭/替换/失败才释放。
 [[nodiscard]] std::expected<void, error> send(notification n);
 
 // ---- 权限接口 ----

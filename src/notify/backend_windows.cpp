@@ -33,6 +33,9 @@ using winrt::Windows::UI::Notifications::ToastNotificationManager;
 using winrt::Windows::UI::Notifications::ToastNotifier;
 using winrt::Windows::UI::Notifications::ToastDismissedEventArgs;
 
+// 库级默认 AUMID：由 platform::windows::set_aumid() 设置。
+// 为空时使用 CreateToastNotifier() 的进程默认身份（打包应用/有快捷方式的场景）；
+// 未打包应用必须先 register_aumid + set_aumid，否则 Toast 会被系统静默丢弃。
 std::string g_default_aumid;
 
 std::wstring to_wide(std::string_view text) {
@@ -61,6 +64,9 @@ std::wstring xml_escape(std::wstring_view text) {
     return out;
 }
 
+// 生成 ToastGeneric XML。所有文本都做 XML 转义，防止标题/正文中的
+// & < > " ' 破坏 XML 结构。actions 的 arguments 使用 action.id，
+// 激活时通过 ToastActivatedEventArgs.Arguments() 取回。
 std::wstring build_toast_xml(const notification& n) {
     std::wstring xml;
     xml += L"<toast>";
@@ -100,6 +106,8 @@ std::wstring build_toast_xml(const notification& n) {
     return xml;
 }
 
+// WinRT 后端。所有事件回调由 WinRT 在事件线程的消息泵中触发
+// （poll_once 负责 PeekMessage/DispatchMessage）。
 class backend_windows final : public backend {
   public:
     backend_windows() = default;
@@ -128,6 +136,12 @@ class backend_windows final : public backend {
         }
     }
 
+    // 投递 Toast。流程：
+    //   1. 确保事件线程已初始化 STA 公寓；
+    //   2. 生成 XML，创建 ToastNotification，设置内部唯一 Tag/Group；
+    //   3. 注册 Dismissed / Activated / Failed 回调；
+    //   4. Show() 后再处理旧 tag 通知（先投递后替换，避免空窗期）；
+    //   5. 记录 pending_，后续事件按 id 查找。
     std::expected<uint64_t, error> send(notification n) override {
         try {
             ensure_apartment();
@@ -223,6 +237,8 @@ class backend_windows final : public backend {
         winrt::event_token failed_token{};
     };
 
+    // 惰性初始化 WinRT STA。使用静态原子标志而非 once_flag，
+    // 使重复调用开销极低；init_apartment 必须在事件线程首次使用 WinRT 前调用。
     static void ensure_apartment() {
         static std::atomic<bool> initialized{false};
         if (initialized.load(std::memory_order_acquire)) {
@@ -257,6 +273,8 @@ class backend_windows final : public backend {
         }
     }
 
+    // 用户关闭/超时：移除 pending 并触发 on_closed。
+    // TimedOut → expired，UserCanceled → dismissed，其它 → unknown。
     void on_dismissed(std::uint64_t id, ToastDismissalReason reason) {
         const auto it = pending_.find(id);
         if (it == pending_.end()) {
@@ -291,6 +309,8 @@ class backend_windows final : public backend {
         }
     }
 
+    // 用户点击通知正文或按钮：Arguments() 即 action.id（正文点击通常为空串）。
+    // close_on_action=true 时先隐藏 Toast 并摘除 pending，保证只回调一次。
     void on_activated(std::uint64_t id, IInspectable const& args) {
         const auto it = pending_.find(id);
         if (it == pending_.end()) {
@@ -372,6 +392,8 @@ class backend_windows final : public backend {
 
 } // namespace
 
+// 在 HKCU\Software\Classes\AppUserModelId\<aumid> 写入 DisplayName / IconUri。
+// 未打包应用调用一次即可；重复调用是幂等的（覆盖写）。
 std::expected<void, error> windows_register_aumid(std::string_view aumid,
                                                   std::string_view display_name,
                                                   std::string_view icon_path) {

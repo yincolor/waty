@@ -1,3 +1,7 @@
+// macOS 托盘上下文后端（占位实现）。
+// 计划：确保 NSApplication 已初始化，并持有进程级 NSStatusBar。
+// 当前返回 PlatformNotSupported。
+
 #include "../platform.hpp"
 
 #include <waty/tray.hpp>

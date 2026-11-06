@@ -1,3 +1,13 @@
+// Linux 托盘上下文：进程级共享 D-Bus 连接 + GLib 主循环集成。
+//
+// 设计：
+//   * 所有托盘图标共享同一条会话总线连接（g_connection）；
+//   * 把 libdbus 的 watch 映射为 GSource（g_unix_fd_source_new），
+//     因此 D-Bus 消息在 GTK/GLib 主循环（UI 线程）上派发；
+//   * 必须安装 watch 函数，否则 send_with_reply_and_block 阻塞读期间会丢弃
+//     面板发来的其它消息（例如注册时立即到达的 GetAll）。
+//   * platform_cleanup() 由 TrayContext 析构触发，幂等。
+
 #include "../platform.hpp"
 
 #include "sni_dbus.hpp"

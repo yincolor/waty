@@ -1,5 +1,15 @@
 #pragma once
 
+// 单数据库连接封装（仅 src/ 内部使用）。
+//
+// 每个 Sqlite3Database 独占一个 sqlite3* 与一个工作线程：
+//   * 所有 SQL 通过 submit() 投递到该线程，严格按投递顺序执行；
+//   * 不同数据库之间互不阻塞；
+//   * 关闭时先标记 stopping（后续 submit 抛 SQLITE3_CLOSING），
+//     再排空已入队任务并 join，最后 sqlite3_close_v2。
+//
+// 异常传播：任务体抛出的异常由 packaged_task 写入 future，不会打断工作线程。
+
 #include <sqlite3.h>
 
 #include <condition_variable>
@@ -45,6 +55,7 @@ namespace waty::detail
 
         /// 投递任务到本库工作线程；返回的 future 由调用方等待。
         /// 关闭中会抛 Sqlite3Error{SQLITE3_CLOSING}（调用方用 guard 转为 rejected future）。
+        /// 模板参数 F 的签名必须为 result(sqlite3*)，result 任意可放入 future 的类型。
         template <typename F>
         auto submit(F &&call) -> std::future<std::invoke_result_t<F, sqlite3 *>>
         {
@@ -71,6 +82,7 @@ namespace waty::detail
 
         // 声明顺序即构造顺序：m_worker 必须最后声明，
         // 否则线程可能在 m_mtx / m_cv / m_tasks 构造完成前就进入 run()。
+        // m_db 的所有权在本类：析构时才 close；任务内不得自行 close。
         std::string m_path;
         sqlite3 *m_db = nullptr;
 

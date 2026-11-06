@@ -1,5 +1,13 @@
 #pragma once
 
+// 订阅句柄（见 DESIGN.md §7.2.1）。
+//
+// Subscription 是“取消订阅”的 RAII 风格句柄，但刻意不在析构时自动取消：
+// 这样可以安全地把句柄交给其它组件而不意外断开监听。
+//
+// 线程安全：unsubscribe() / valid() 可跨线程调用；多个句柄共享同一 State。
+// 移动后原对象失效（m_state 为空，valid() 返回 false）。
+
 #include <functional>
 #include <memory>
 #include <mutex>

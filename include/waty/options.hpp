@@ -1,5 +1,15 @@
 #pragma once
 
+// waty 配置结构集合（见 DESIGN.md §6）。
+//
+// 包含三层配置：
+//   * ApplicationOptions —— 应用级（名称、图标、数据目录、日志、权限、sqlite3）；
+//   * WebWindowOptions   —— 窗口级（尺寸、边框、父窗口、WebView 数据目录）；
+//   * 辅助选项           —— 权限、文件过滤器、对话框、sqlite3。
+//
+// 权限模型：除 IPC 外，暴露给 JS 的能力默认全部关闭（显式授权）。
+// 未启用的模块既不会注入 JS 代码，也不会响应对应的桥接消息。
+
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -11,7 +21,9 @@ namespace waty
 {
     class WebWindow;
 
-    /// 文件系统权限（见文档 6.1）
+    /// 文件系统权限（见文档 6.1）。
+    /// read 启用 window.waty.fs 的读取/stat/exists/读流；
+    /// write 启用 writeFile/写流。二者相互独立。
     struct FsPermissionOptions
     {
         bool read  = false;
@@ -25,7 +37,8 @@ namespace waty
         std::size_t maxOpenDatabases = 64;
     };
 
-    /// JS 权限配置（见文档 6.2）
+    /// JS 权限配置（见文档 6.2）。
+    /// 默认值即“最小权限”：仅 IPC 打开；需要前端能力时逐项显式开启。
     struct PermissionOptions
     {
         bool ipc      = true;   // IPC 是基础能力，默认开启的例外
@@ -41,7 +54,9 @@ namespace waty
         FsPermissionOptions fs;
     };
 
-    /// 应用配置（见文档 6.3）
+    /// 应用配置（见文档 6.3）。
+    /// appName / organizationName 会直接拼进用户数据目录，因此必须通过严格校验，
+    /// 否则构造函数抛 std::invalid_argument（防止 ../ 之类的路径穿越）。
     struct ApplicationOptions
     {
         std::string appName;  // 应用名称 或 项目名称（严格校验：^[A-Za-z0-9_.]+$，1-64 字符，不得以 . 开头/结尾）
@@ -65,7 +80,9 @@ namespace waty
         PermissionOptions permissions;
     };
 
-    /// 窗口配置（见文档 6.4）
+    /// 窗口配置（见文档 6.4）。
+    /// title / icon 是 string_view：创建窗口时会被拷贝进内部实现，
+    /// 调用方无需保证其生命周期超过 createWindow()。
     struct WebWindowOptions
     {
         std::string_view title;      // 窗口标题
